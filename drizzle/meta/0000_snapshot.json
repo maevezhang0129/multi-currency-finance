@@ -1,0 +1,133 @@
+{
+  "id": "6424dc76-b19d-40da-854c-e621fb4e5d65",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.fx_rates": {
+      "name": "fx_rates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "fx_rates_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "base_currency": {
+          "name": "base_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quote_currency": {
+          "name": "quote_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "month": {
+          "name": "month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate": {
+          "name": "rate",
+          "type": "numeric(20, 10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "fx_rates_month_idx": {
+          "name": "fx_rates_month_idx",
+          "columns": [
+            {
+              "expression": "month",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "fx_rates_pair_month_key": {
+          "name": "fx_rates_pair_month_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "base_currency",
+            "quote_currency",
+            "month"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "fx_rates_base_currency_format": {
+          "name": "fx_rates_base_currency_format",
+          "value": "\"fx_rates\".\"base_currency\" ~ '^[A-Z]{3}$'"
+        },
+        "fx_rates_quote_currency_format": {
+          "name": "fx_rates_quote_currency_format",
+          "value": "\"fx_rates\".\"quote_currency\" ~ '^[A-Z]{3}$'"
+        },
+        "fx_rates_distinct_currencies": {
+          "name": "fx_rates_distinct_currencies",
+          "value": "\"fx_rates\".\"base_currency\" <> \"fx_rates\".\"quote_currency\""
+        },
+        "fx_rates_month_format": {
+          "name": "fx_rates_month_format",
+          "value": "\"fx_rates\".\"month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
+        },
+        "fx_rates_rate_positive": {
+          "name": "fx_rates_rate_positive",
+          "value": "\"fx_rates\".\"rate\" > 0"
+        }
+      },
+      "isRLSEnabled": true
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
