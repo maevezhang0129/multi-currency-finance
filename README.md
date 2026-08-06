@@ -73,9 +73,35 @@ npm run dev
   撞上了再回来改配置便宜。
 
 两条串都在 Supabase 控制台的 **Connect** 按钮里（也可从 Project Settings → Database
-进入）。**原样复制，不要拿一条改端口推导另一条**——不同项目的 session 模式主机名
-不一定相同。direct connection 默认只有 IPv6；本机没有全局 IPv6 地址时用 Session
+进入）。direct connection 默认只有 IPv6；本机没有全局 IPv6 地址时用 Session
 pooler 那条（IPv4，全 tier 可用）。
+
+<details>
+<summary>连不上？先确认不是本地网络的问题</summary>
+
+不少网络环境（公司防火墙、部分代理节点）会封 **5432**，而 6543 放行。症状是
+TCP 连接能建立、随即被对端关闭且不返回任何字节，客户端表现为长时间挂起。
+
+判断方法：**不要用 `nc -z`**。在 fake-IP 模式的代理下，本地代理会先接受连接，
+`nc` 一律报"通"，是假阳性。改用 Postgres 协议探测——发一个 SSLRequest 包，
+服务器回 `S` 才说明真的连到了 Postgres：
+
+```bash
+python3 - <<'PY'
+import socket, struct
+s = socket.create_connection(("<host>", 5432), timeout=15); s.settimeout(15)
+s.sendall(struct.pack("!ii", 8, 80877103))
+print(repr(s.recv(1)))   # b'S' = 真的连到 Postgres；b'' = 上游没通
+PY
+```
+
+拿一台第三方公开 Postgres 做对照（例如 `hh-pgsql-public.ebi.ac.uk:5432`），
+如果它也是同样症状，那就是本地网络封了这个端口，与 Supabase 无关。
+
+绕过办法：本地迁移临时把 `DIRECT_DATABASE_URL` 指向 6543 那条。drizzle 的
+migrator 在 transaction 模式下能正常工作，只是碰不了 `CREATE INDEX CONCURRENTLY`。
+
+</details>
 
 ### 脚本
 
