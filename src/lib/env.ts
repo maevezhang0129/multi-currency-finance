@@ -13,12 +13,19 @@ import { z } from "zod";
  */
 const serverEnvSchema = z.object({
   /** 运行时连接串。Supabase transaction pooler（端口 6543），适配 serverless。 */
-  DATABASE_URL: z.string().url(),
+  DATABASE_URL: z.url(),
   /**
-   * 迁移专用连接串。Supabase direct connection（端口 5432）。
-   * drizzle-kit 需要执行 DDL 并使用 advisory lock，transaction pooler 不适合。
+   * 迁移专用连接串。Session pooler 或 direct connection。
+   * 与运行时分开的理由见 drizzle.config.ts 的注释。
    */
-  DIRECT_DATABASE_URL: z.string().url(),
+  DIRECT_DATABASE_URL: z.url(),
+  /**
+   * 保护 cron 端点。Vercel 触发定时任务时会带 `Authorization: Bearer <CRON_SECRET>`，
+   * 该变量由平台自动注入到生产环境；本地需要自己在 .env.local 里放一个。
+   *
+   * 要求最小长度，是为了挡住「设成 `dev` 图省事」这种写法——那等于没有保护。
+   */
+  CRON_SECRET: z.string().min(16, "至少 16 个字符，太短等于没有保护"),
 });
 
 function loadServerEnv(): z.infer<typeof serverEnvSchema> {
