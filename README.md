@@ -63,13 +63,19 @@ npm run dev
 - `DATABASE_URL` —— Supavisor **transaction pooler（6543）**。应用运行时用。
   serverless 函数实例频繁创建销毁，直连会打满 Postgres 的连接上限。
   代价是这个模式不支持 prepared statement，所以驱动侧必须 `prepare: false`。
-- `DIRECT_DATABASE_URL` —— **direct connection（5432）**。只有本地跑 drizzle-kit 时用。
-  迁移要执行 DDL 并依赖会话级 advisory lock，而 transaction 模式会在事务之间
-  把连接换掉，锁语义不成立。
+- `DIRECT_DATABASE_URL` —— **Session pooler 或 direct connection**。只有本地跑
+  drizzle-kit 时用，应用运行时不读它。
 
-两条串都在 Supabase 控制台 Project Settings → Database → Connection string 里。
-direct connection 默认是 IPv6 的；如果你的网络只有 IPv4，改用 Supavisor session
-mode（同样的 pooler 域名，端口 5432）。
+  分开不是因为迁移在 transaction pooler 上跑不了——drizzle 的 migrator 把迁移包在
+  一个事务里，实测能正常应用。真正的原因是那条路有个够不着的天花板：
+  `CREATE INDEX CONCURRENTLY` 不能在事务内执行，而 transaction 模式下每条语句都
+  身处事务。等到表大得需要不锁表加索引时，迁移会卡死在这里。把出口预留好，比
+  撞上了再回来改配置便宜。
+
+两条串都在 Supabase 控制台的 **Connect** 按钮里（也可从 Project Settings → Database
+进入）。**原样复制，不要拿一条改端口推导另一条**——不同项目的 session 模式主机名
+不一定相同。direct connection 默认只有 IPv6；本机没有全局 IPv6 地址时用 Session
+pooler 那条（IPv4，全 tier 可用）。
 
 ### 脚本
 
