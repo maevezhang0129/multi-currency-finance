@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  averageRate,
-  fetchDailyRatesForMonth,
-  FxFetchError,
-} from "./frankfurter";
+import { fetchDailyRates, FxFetchError } from "./frankfurter";
 
-/** 不真的等待，否则重试测试要跑好几秒。 */
+/** 不真的等待，否则重试测试要跑几十秒。 */
 const noSleep = () => Promise.resolve();
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -22,9 +18,9 @@ const validPayload = {
   start_date: "2026-07-01",
   end_date: "2026-07-31",
   rates: {
-    "2026-07-02": { SEK: 9.718 },
-    "2026-07-01": { SEK: 9.7474 },
-    "2026-07-03": { SEK: 9.6362 },
+    "2026-07-02": { SEK: 9.718, THB: 33.4 },
+    "2026-07-01": { SEK: 9.7474, THB: 33.2 },
+    "2026-07-03": { SEK: 9.6362, THB: 33.3 },
   },
 };
 
@@ -32,43 +28,76 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("fetchDailyRatesForMonth", () => {
-  it("解析出每日汇率并按日期升序排列", async () => {
+describe("fetchDailyRates", () => {
+  it("解析出每日观测值并按日期升序排列", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(validPayload)));
 
-    const daily = await fetchDailyRatesForMonth("USD", "SEK", "2026-07", {
-      sleep: noSleep,
-    });
+    const daily = await fetchDailyRates(
+      "USD",
+      ["SEK", "THB"],
+      "2026-07-01",
+      "2026-07-31",
+      { sleep: noSleep },
+    );
 
     expect(daily.map((d) => d.date)).toEqual([
       "2026-07-01",
       "2026-07-02",
       "2026-07-03",
     ]);
-    expect(daily[0]?.rate).toBe(9.7474);
+    expect(daily[0]?.rates).toEqual({ SEK: 9.7474, THB: 33.2 });
   });
 
-  it("请求的区间是整个月", async () => {
+  it("一次请求带上全部币种，而不是每个币种一个请求", async () => {
+    // 这是本模块的核心约束：接口对连续快速请求是静默丢弃的，
+    // 请求数必须压到个位数。
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(validPayload));
     vi.stubGlobal("fetch", fetchMock);
 
-    await fetchDailyRatesForMonth("USD", "SEK", "2026-07", { sleep: noSleep });
+    await fetchDailyRates("USD", ["SEK", "THB", "CNY"], "2026-07-01", "2026-07-31", {
+      sleep: noSleep,
+    });
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const url = String(fetchMock.mock.calls[0]?.[0]);
     expect(url).toContain("2026-07-01..2026-07-31");
-    expect(url).toContain("base=USD");
-    expect(url).toContain("symbols=SEK");
+    expect(url).toContain("symbols=SEK%2CTHB%2CCNY");
+  });
+
+  it("丢弃请求区间之外的日期", async () => {
+    // 实测：请求 2019-01-01 起，接口会把 2018-12-31 也带回来。
+    // 不丢掉的话 2018-12 会凭一条观测值算出一个假的月均值。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          ...validPayload,
+          rates: {
+            "2026-06-30": { SEK: 9.9 },
+            "2026-07-01": { SEK: 9.7474 },
+            "2026-08-01": { SEK: 9.5 },
+          },
+        }),
+      ),
+    );
+
+    const daily = await fetchDailyRates("USD", ["SEK"], "2026-07-01", "2026-07-31", {
+      sleep: noSleep,
+    });
+
+    expect(daily.map((d) => d.date)).toEqual(["2026-07-01"]);
   });
 
   it("空 rates 返回空数组，不当作错误", async () => {
-    // CNY 在 2005 年前没有数据，这是正常情况，调用方跳过该月即可。
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(jsonResponse({ ...validPayload, rates: {} })),
     );
 
     await expect(
-      fetchDailyRatesForMonth("USD", "CNY", "2001-05", { sleep: noSleep }),
+      fetchDailyRates("USD", ["CNY"], "2001-05-01", "2001-05-31", {
+        sleep: noSleep,
+      }),
     ).resolves.toEqual([]);
   });
 
@@ -79,45 +108,66 @@ describe("fetchDailyRatesForMonth", () => {
       .mockResolvedValueOnce(jsonResponse(validPayload));
     vi.stubGlobal("fetch", fetchMock);
 
-    const daily = await fetchDailyRatesForMonth("USD", "SEK", "2026-07", {
-      sleep: noSleep,
-    });
+    const daily = await fetchDailyRates(
+      "USD",
+      ["SEK"],
+      "2026-07-01",
+      "2026-07-31",
+      { sleep: noSleep },
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(daily).toHaveLength(3);
   });
 
   it("4xx 不重试，直接抛错", async () => {
-    // 重点：请求本身有问题时重试多少次都一样，白白拖长故障时间。
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}, 404));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchDailyRatesForMonth("USD", "XXX", "2026-07", { sleep: noSleep }),
+      fetchDailyRates("USD", ["XXX"], "2026-07-01", "2026-07-31", {
+        sleep: noSleep,
+      }),
     ).rejects.toThrow(FxFetchError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("网络错误会重试，耗尽次数后抛错", async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network down"));
+  it("超时会重试，且错误信息里说清是超时", async () => {
+    // 限流表现为超时而非 429，错误信息必须让人看懂发生了什么。
+    const timeout = new DOMException("The operation was aborted", "TimeoutError");
+    const fetchMock = vi.fn().mockRejectedValue(timeout);
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchDailyRatesForMonth("USD", "SEK", "2026-07", {
-        attempts: 3,
+      fetchDailyRates("USD", ["SEK"], "2026-07-01", "2026-07-31", {
+        attempts: 2,
         sleep: noSleep,
       }),
-    ).rejects.toThrow(/请求汇率接口失败/);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    ).rejects.toThrow(/超时/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("网络错误的信息里带上底层原因", async () => {
+    // 早先版本只说「请求失败」，根因被吞掉，日志等于没记。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("fetch failed: ECONNRESET")),
+    );
+
+    await expect(
+      fetchDailyRates("USD", ["SEK"], "2026-07-01", "2026-07-31", {
+        attempts: 1,
+        sleep: noSleep,
+      }),
+    ).rejects.toThrow(/ECONNRESET/);
   });
 
   it("退避间隔按 2 的幂增长", async () => {
     const waits: number[] = [];
-    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network down"));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("down")));
 
     await expect(
-      fetchDailyRatesForMonth("USD", "SEK", "2026-07", {
+      fetchDailyRates("USD", ["SEK"], "2026-07-01", "2026-07-31", {
         attempts: 4,
         backoffMs: 100,
         sleep: async (ms) => {
@@ -142,7 +192,9 @@ describe("fetchDailyRatesForMonth", () => {
     );
 
     await expect(
-      fetchDailyRatesForMonth("USD", "SEK", "2026-07", { sleep: noSleep }),
+      fetchDailyRates("USD", ["SEK"], "2026-07-01", "2026-07-31", {
+        sleep: noSleep,
+      }),
     ).rejects.toThrow(/结构不符合预期/);
   });
 
@@ -153,28 +205,9 @@ describe("fetchDailyRatesForMonth", () => {
     );
 
     await expect(
-      fetchDailyRatesForMonth("USD", "SEK", "2026-07", { sleep: noSleep }),
+      fetchDailyRates("USD", ["SEK"], "2026-07-01", "2026-07-31", {
+        sleep: noSleep,
+      }),
     ).rejects.toThrow(/基准币是 EUR/);
-  });
-});
-
-describe("averageRate", () => {
-  it("算术平均", () => {
-    expect(
-      averageRate([
-        { date: "2026-07-01", rate: 10 },
-        { date: "2026-07-02", rate: 12 },
-        { date: "2026-07-03", rate: 14 },
-      ]),
-    ).toBe(12);
-  });
-
-  it("空数组返回 undefined，而不是 0 或 NaN", () => {
-    // 返回 0 会被当成一个真实汇率写进库，是最坏的失败方式。
-    expect(averageRate([])).toBeUndefined();
-  });
-
-  it("单个观测值就是它自己", () => {
-    expect(averageRate([{ date: "2026-07-01", rate: 9.5 }])).toBe(9.5);
   });
 });
