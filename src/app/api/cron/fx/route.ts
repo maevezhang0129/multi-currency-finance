@@ -1,7 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
-
 import { z } from "zod";
 
+import { isCronAuthorized, unauthorizedResponse } from "@/lib/cron-auth";
 import {
   BASE_CURRENCY,
   EARLIEST_MONTH,
@@ -10,33 +9,12 @@ import {
 } from "@/lib/fx/config";
 import { ingestMonths, summarize } from "@/lib/fx/ingest";
 import { isMonth, monthsBetween, previousMonth } from "@/lib/fx/month";
-import { serverEnv } from "@/lib/env";
 
 /** 读 header 本就使 GET 变为动态，这里写明是为了让意图一眼可见。 */
 export const dynamic = "force-dynamic";
 
 /** 月度任务只抓 3 个币种对，很快；给回填留点余量。 */
 export const maxDuration = 60;
-
-/**
- * 比较密钥。用定长时间比较而不是 `===`。
- *
- * `===` 在第一个不同的字节就返回，攻击者能通过测量响应时间逐字节猜出密钥。
- * 这条路径上密钥是固定的、可被反复探测，正是时序攻击适用的场景。
- */
-function secretMatches(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  // timingSafeEqual 要求等长，长度本身不是秘密，先比长度是安全的。
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
-function isAuthorized(request: Request): boolean {
-  const header = request.headers.get("authorization");
-  if (!header?.startsWith("Bearer ")) return false;
-  return secretMatches(header.slice("Bearer ".length), serverEnv.CRON_SECRET);
-}
 
 const monthParam = z.string().refine(isMonth, "应为 YYYY-MM 格式");
 
@@ -62,10 +40,7 @@ const querySchema = z
  * 同一段代码，只是范围参数不同。
  */
 export async function GET(request: Request): Promise<Response> {
-  if (!isAuthorized(request)) {
-    // 不解释哪里不对：对未通过鉴权的调用者，任何细节都是情报。
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!isCronAuthorized(request)) return unauthorizedResponse();
 
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({

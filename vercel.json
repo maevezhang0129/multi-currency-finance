@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/fx",
       "schedule": "0 3 1 * *"
+    },
+    {
+      "path": "/api/cron/keepalive",
+      "schedule": "0 4 * * *"
     }
   ]
 }
