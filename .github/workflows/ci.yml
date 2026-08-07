@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支上新推送时取消还在跑的旧任务，避免排队浪费。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # 跟着 .nvmrc 走，CI 与本地、与 Vercel 运行时用同一个大版本。
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # 必须走 npm 脚本而不是裸 tsc：脚本里先跑 next typegen，
+      # 否则拿不到 Next 生成的路由类型（如 LayoutProps），会误报类型错误。
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm run test
+
+      # 刻意不在 CI 里跑 `npm run build`。
+      #
+      # src/lib/env.ts 在模块加载时校验环境变量，而 next build 会加载到那些
+      # 模块——CI 里没有 DATABASE_URL，构建必然失败，且报错看起来像代码有问题
+      # 而不是配置缺失。塞一组假连接串能让它跑完，但那样「构建通过」就不再
+      # 说明任何事情。
+      #
+      # 构建由 Vercel 在每次 push 时用真实环境变量验证，那才是有意义的那一次。
