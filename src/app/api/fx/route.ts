@@ -2,22 +2,11 @@ import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 
 import { db } from "@/db";
 import { fxRates } from "@/db/schema";
+import type { FxResponse, FxSeriesPoint } from "@/lib/fx/api-types";
 import { parseFxQuery } from "@/lib/fx/query";
 
 /** 读 searchParams 本就使 GET 变为动态，写明是为了让意图一眼可见。 */
 export const dynamic = "force-dynamic";
-
-interface SeriesPoint {
-  month: string;
-  /**
-   * 保持字符串，不转 number。
-   *
-   * 库里是 numeric，Drizzle 映射为 string 正是为了不丢精度；在这里
-   * 图省事转成 number，精度就在 API 边界上没了，之后谁也补不回来。
-   * 前端画图时再转，转的是展示值而不是存储值。
-   */
-  rate: string;
-}
 
 export async function GET(request: Request): Promise<Response> {
   const parsed = parseFxQuery(new URL(request.url).searchParams);
@@ -49,7 +38,7 @@ export async function GET(request: Request): Promise<Response> {
     )
     .orderBy(asc(fxRates.month));
 
-  const pointsByQuote = new Map<string, SeriesPoint[]>();
+  const pointsByQuote = new Map<string, FxSeriesPoint[]>();
   for (const row of rows) {
     const points = pointsByQuote.get(row.quote);
     if (points === undefined) {
@@ -67,8 +56,15 @@ export async function GET(request: Request): Promise<Response> {
     points: pointsByQuote.get(quote) ?? [],
   }));
 
+  const body: FxResponse = {
+    base,
+    from: from ?? null,
+    to: to ?? null,
+    series,
+  };
+
   return Response.json(
-    { base, from: from ?? null, to: to ?? null, series },
+    body,
     {
       // 区间内无数据是 200 空数组，不是 404：`/api/fx?from=1990-01` 是一个
       // 完全合法的问题，答案恰好是空。用 404 会让前端分不清「没数据」和
