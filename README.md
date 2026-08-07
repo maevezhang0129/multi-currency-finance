@@ -116,6 +116,84 @@ migrator 在 transaction 模式下能正常工作，只是碰不了 `CREATE INDE
 
 ---
 
+## API
+
+后端只暴露一个查询接口。它提供的是公共汇率数据，不涉及任何用户信息，因此不需要
+鉴权。
+
+### `GET /api/fx`
+
+| 参数 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `base` | 否 | `USD` | 基准币。目前只支持 `USD`，传别的返回 400 |
+| `quote` | 否 | `SEK,THB,CNY` | 报价币，逗号分隔可多个。只接受已跟踪的币种 |
+| `from` | 否 | 不设下界 | 起始月份，`YYYY-MM` |
+| `to` | 否 | 不设上界 | 结束月份，`YYYY-MM` |
+
+全部可省略，所以裸调 `/api/fx` 就能拿到完整数据——前端不必先知道有哪些币种。
+
+```bash
+curl "http://localhost:3000/api/fx?quote=SEK,CNY&from=2024-01&to=2024-03"
+```
+
+```jsonc
+{
+  "base": "USD",
+  "from": "2024-01",          // 请求时省略则为 null
+  "to": "2024-03",
+  "series": [                 // 顺序与请求给定的币种顺序一致
+    {
+      "quote": "SEK",
+      "points": [             // 按月份升序；该币种无数据时为空数组
+        { "month": "2024-01", "rate": "10.4012857143" }
+      ]
+    }
+  ]
+}
+```
+
+**`rate` 是字符串，不是数字。** 库里是 `numeric`，Drizzle 映射为 `string` 正是为了
+不丢精度；在 API 边界上转成 `number`，精度就没了且补不回来。要画图时再转，
+转出来的是展示值。
+
+**状态码**
+
+| 码 | 何时 |
+|---|---|
+| 200 | 正常。**区间内没有数据也是 200**，`points` 为空数组 |
+| 400 | 入参不合法。响应体的 `details` 指明是哪个字段错 |
+
+区间内无数据不用 404：`/api/fx?from=1990-01` 是一个完全合法的问题，答案恰好是空。
+用 404 会让调用方分不清「没数据」和「路径写错了」，而这两种情况在界面上是两种
+完全不同的呈现。
+
+**缓存**：`public, max-age=0, s-maxage=86400, stale-while-revalidate=604800`。
+汇率一个月才变一次，没必要每次请求都打一遍数据库。
+
+## 部署
+
+连上 GitHub 仓库后，Vercel 会自动识别 Next.js 并构建。需要额外做三件事：
+
+**1. 配置环境变量**（Project Settings → Environment Variables）
+
+`DATABASE_URL` 和 `DIRECT_DATABASE_URL` 照本地 `.env.local` 填。`CRON_SECRET`
+由 Vercel 在启用 Cron 时自动注入，**但部署后要实测确认**——若未注入，cron 触发会
+因鉴权失败拿到 401。
+
+**2. 函数区域**
+
+`vercel.json` 里 `"regions": ["icn1"]` 把函数钉在首尔，与 Supabase 项目所在的
+`ap-northeast-2` 同区。不钉的话函数默认落在美东，每次查询都要跨太平洋往返。
+
+> Node runtime 的函数只能用 `vercel.json` 的 `regions` 指定；路由段配置里的
+> `preferredRegion` 只对 edge runtime 生效，这里用不上。Hobby 计划可以任选
+> **一个**区域，多区域是 Pro 以上才有的能力。
+
+**3. 验证 cron 真的会跑**
+
+不用等到下个月 1 号。Vercel 控制台的 Cron Jobs 页面可以手动触发一次，
+然后看函数日志确认返回 200 而不是 401。
+
 ## 设计取舍
 
 ### 一、用户账本数据永不入库
