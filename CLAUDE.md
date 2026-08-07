@@ -130,6 +130,72 @@
 4. 写好 README。**到此为止，一个合格的全栈展示项目已经成立。**
 5. （可选，之后再议）前端接入用户本地账本：localStorage 存储、CSV 导入、用冻结汇率做折算与分析、双币种视角。
 
+---
+
+## 9. 常用命令
+
+需要 Node 22（`.nvmrc`）。改完代码至少跑 `npm run typecheck` 和 `npm run test`。
+
+| 命令 | 说明 |
+|---|---|
+| `npm run dev` | 开发服务器 |
+| `npm run typecheck` | `next typegen && tsc --noEmit`。**必须走这个脚本**，裸 `tsc` 拿不到 Next 生成的路由类型 |
+| `npm run lint` | ESLint（flat config，`eslint` 无参即全量） |
+| `npm run test` | Vitest 单跑一遍；`npm run test:watch` 监听 |
+| `npm run db:generate` | 由 `src/db/schema.ts` 生成迁移 SQL 到 `drizzle/` |
+| `npm run db:migrate` | 应用迁移，走 `DIRECT_DATABASE_URL` |
+| `npm run db:studio` | Drizzle Studio |
+
+单个测试文件 / 单个用例：
+
+```bash
+npx vitest run src/lib/fx/month.test.ts
+npx vitest run -t "addMonths"
+```
+
+没有 `vitest.config.ts`，用的是默认配置：测试文件与源码同目录，命名 `*.test.ts`。
+
+手动回填历史汇率（本地）：
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  "http://localhost:3000/api/cron/fx?from=2020-01&to=2024-12"
+```
+
+不带 `from`/`to` 就是 cron 的正常行为——只抓上一个自然月。
+
+## 10. 代码地图：汇率链路的实际形态
+
+```
+vercel.json (0 3 1 * *)
+  → GET /api/cron/fx            src/app/api/cron/fx/route.ts   鉴权 + 入参校验 + 汇总/日志
+      → ingestMonths()          src/lib/fx/ingest.ts           分批 + 幂等 upsert
+          → fetchDailyRates()   src/lib/fx/frankfurter.ts      唯一的网络边界，zod 校验
+          → monthlyAverages()   src/lib/fx/aggregate.ts        纯函数，当月均值
+          → db.insert(fxRates)  src/db/schema.ts               唯一一张表
+```
+
+几条贯穿性的约定，改任何一层前先理解：
+
+- **`src/lib/fx/config.ts` 不是环境变量。** `BASE_CURRENCY` / `QUOTE_CURRENCIES` / `EARLIEST_MONTH` / `MAX_MONTHS_PER_RUN` 是产品定义，写死在代码里，改币种走 commit 而不是改生产配置。
+- **失败是返回值，不是异常。** `ingest.ts` 返回 `IngestOutcome[]`，三态 `written | skipped | failed`。一批失败不中断其余批次，但失败一定出现在返回值里——不要改成抛异常，也不要把 `skipped` 折叠进计数后丢掉清单。
+- **`skipped` 和 `failed` 语义不同。** `skipped` = 数据源那个月本来就没有（CNY 早于 2005）；`failed` = 出错了。混为一谈会让静默的数据缺失变得不可见。
+- **纯函数与副作用分离。** `month.ts` / `aggregate.ts` 无 IO，测试覆盖在这两层。`ingest.ts` 和 `route.ts` 目前无测试（会打真实网络和真库），新增逻辑尽量往纯函数那侧放。
+- **`month.ts` 不用 `Date` 做月份加减**，字符串 + 整数运算，避免部署环境时区把月初月末算偏。取「当前月」一律走 `monthOf(date)`（UTC）。
+- **服务端专属模块顶部有 `import "server-only"`**（`src/db/index.ts`、`src/lib/env.ts`）。这是第 3 节那条原则的构建期保障，不要为了图方便去掉。
+
+## 11. 已经踩过的坑（动这条链路前必读）
+
+这些是实测结论，不是推测，代码里的写法都是为了绕开它们：
+
+1. **Frankfurter 的限流是静默丢弃的。** 连续快速请求，第 4 个起既不返回 429 也不返回任何响应，只是挂到超时。因此重点是**把请求数压到个位数**，而不是靠状态码退避：`MONTHS_PER_REQUEST = 60`、批次间隔 6 秒、退避从 5 秒起。不要把批拆小、不要缩短间隔。
+2. **区间查询会把起点往前贴到最近一个交易日。** 请求 `2019-01-01` 起，返回里会有 `2018-12-31`。`fetchDailyRates` 里那段按区间过滤是必须的，去掉会凭一条越界观测值算出假的月均值。
+3. **部分响应会伪装成 `skipped`。** 限流时曾返回过缺最后一个月的响应，整体仍是 200。所以 route 会把 `skipped` 清单原样回给调用方并 `console.warn`——这个行为别删。
+4. **两条连接串不能互换。** `DATABASE_URL` = 6543 transaction pooler，驱动侧必须 `prepare: false` + `max: 1`；`DIRECT_DATABASE_URL` 只给 drizzle-kit，运行时不读。理由见 `drizzle.config.ts` 和 README。
+5. **schema 的 `check` 约束里写 `[0-9]` 而不是 `\d`。** JS 模板字符串会吃掉反斜杠，正则静默退化成 `^d{4}-...`，结果是任何合法月份都存不进去。
+6. **`tsconfig` 开了 `noUncheckedIndexedAccess`。** 数组下标访问、正则捕获组之后都必须显式收窄，代码里那些看似多余的 `=== undefined` 判断是为此存在的。`any` 一律禁止（第 6 节）。
+7. **`rate` 是 `numeric`，Drizzle 映射为 `string`。** 中途落到 JS `number` 上就已经丢精度，别为了「方便」加一层 `Number()`。
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
