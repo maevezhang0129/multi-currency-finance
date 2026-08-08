@@ -176,9 +176,13 @@ curl "http://localhost:3000/api/fx?quote=SEK,CNY&from=2024-01&to=2024-03"
 
 **1. 配置环境变量**（Project Settings → Environment Variables）
 
-`DATABASE_URL` 和 `DIRECT_DATABASE_URL` 照本地 `.env.local` 填。`CRON_SECRET`
-由 Vercel 在启用 Cron 时自动注入，**但部署后要实测确认**——若未注入，cron 触发会
-因鉴权失败拿到 401。
+生产环境**只需要 `DATABASE_URL` 一条**，照本地 `.env.local` 填。
+
+`DIRECT_DATABASE_URL` 不用配：它只给本地 drizzle-kit 跑迁移用，运行时一行代码都
+不读它。生产环境不跑迁移，配上去只是多存一个用不到的数据库密钥。
+
+`CRON_SECRET` 由 Vercel 在启用 Cron 时自动注入，**但部署后要实测确认**。若未注入，
+cron 触发会因鉴权失败拿到 401，而这种失败在控制台上看起来只是「任务跑过了」。
 
 **2. 函数区域**
 

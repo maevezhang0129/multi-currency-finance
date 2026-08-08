@@ -11,14 +11,17 @@ import { z } from "zod";
  * 文件顶部的 `server-only` 让任何从客户端组件 import 这里的代码在构建期
  * 直接失败——密钥不可能因为一次疏忽被打进前端 bundle。
  */
+/**
+ * 只列**运行时真正会用到**的变量。
+ *
+ * `DIRECT_DATABASE_URL` 刻意不在这里：它只给 drizzle-kit 跑迁移用，运行时
+ * 一行代码都不读它（drizzle.config.ts 自己会校验，缺了照样报错）。写进这里
+ * 的后果是部署时被迫在生产环境配一个用不到的数据库密钥——多一个密钥就多
+ * 一份泄露面，而它换不来任何东西。
+ */
 const serverEnvSchema = z.object({
   /** 运行时连接串。Supabase transaction pooler（端口 6543），适配 serverless。 */
   DATABASE_URL: z.url(),
-  /**
-   * 迁移专用连接串。Session pooler 或 direct connection。
-   * 与运行时分开的理由见 drizzle.config.ts 的注释。
-   */
-  DIRECT_DATABASE_URL: z.url(),
   /**
    * 保护 cron 端点。Vercel 触发定时任务时会带 `Authorization: Bearer <CRON_SECRET>`，
    * 该变量由平台自动注入到生产环境；本地需要自己在 .env.local 里放一个。
