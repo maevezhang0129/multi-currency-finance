@@ -20,23 +20,44 @@ export async function GET(request: Request): Promise<Response> {
 
   const { base, quotes, from, to } = parsed.query;
 
-  const rows = await db
-    .select({
-      month: fxRates.month,
-      quote: fxRates.quoteCurrency,
-      rate: fxRates.rate,
-    })
-    .from(fxRates)
-    .where(
-      and(
-        eq(fxRates.baseCurrency, base),
-        inArray(fxRates.quoteCurrency, quotes),
-        // 月份是定长零填充的 text，字典序即时间序，可以直接比较。
-        from === undefined ? undefined : gte(fxRates.month, from),
-        to === undefined ? undefined : lte(fxRates.month, to),
-      ),
-    )
-    .orderBy(asc(fxRates.month));
+  let rows;
+  try {
+    rows = await db
+      .select({
+        month: fxRates.month,
+        quote: fxRates.quoteCurrency,
+        rate: fxRates.rate,
+      })
+      .from(fxRates)
+      .where(
+        and(
+          eq(fxRates.baseCurrency, base),
+          inArray(fxRates.quoteCurrency, quotes),
+          // 月份是定长零填充的 text，字典序即时间序，可以直接比较。
+          from === undefined ? undefined : gte(fxRates.month, from),
+          to === undefined ? undefined : lte(fxRates.month, to),
+        ),
+      )
+      .orderBy(asc(fxRates.month));
+  } catch (caught) {
+    // 不捕获的话，Next 会返回一个空 body 的 500，线上排查时什么线索都没有。
+    // 完整错误进服务端日志，响应里只给一个错误码。
+    //
+    // 只回 code 不回 message：Postgres 的错误信息里常带主机名和角色名，
+    // 那些不该出现在公开接口的响应里。而 code 足够定位问题——28P01 是密码错、
+    // ECONNREFUSED 是连不上、ETIMEDOUT 是网络不通。
+    const code =
+      caught instanceof Error && "code" in caught
+        ? String((caught as { code?: unknown }).code)
+        : undefined;
+
+    console.error("[api/fx] 查询失败", caught);
+
+    return Response.json(
+      { error: "查询汇率数据失败", code: code ?? null },
+      { status: 500 },
+    );
+  }
 
   const pointsByQuote = new Map<string, FxSeriesPoint[]>();
   for (const row of rows) {
