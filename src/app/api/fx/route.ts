@@ -8,6 +8,35 @@ import { parseFxQuery } from "@/lib/fx/query";
 /** 读 searchParams 本就使 GET 变为动态，写明是为了让意图一眼可见。 */
 export const dynamic = "force-dynamic";
 
+/**
+ * 从异常里提取可以安全公开的定位信息。
+ *
+ * 要沿着 `cause` 一路挖：Drizzle 会把驱动抛出的错误包一层，真正带错误码的
+ * 那个在里面。只看最外层会得到 code 为空，等于什么都没说。
+ *
+ * 只回 name 和 code，不回 message——Postgres 的错误信息里常带主机名和角色名，
+ * 那些不该出现在公开接口的响应里。而 code 足够定位：28P01 是密码错、
+ * ECONNREFUSED 是连不上、ETIMEDOUT 是网络不通。
+ */
+function describeFailure(caught: unknown): { name: string | null; code: string | null } {
+  let current: unknown = caught;
+
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    if ("code" in current) {
+      const code = (current as { code?: unknown }).code;
+      if (code !== undefined && code !== null) {
+        return { name: current.name, code: String(code) };
+      }
+    }
+    current = current.cause;
+  }
+
+  return {
+    name: caught instanceof Error ? caught.name : null,
+    code: null,
+  };
+}
+
 export async function GET(request: Request): Promise<Response> {
   const parsed = parseFxQuery(new URL(request.url).searchParams);
 
@@ -46,15 +75,10 @@ export async function GET(request: Request): Promise<Response> {
     // 只回 code 不回 message：Postgres 的错误信息里常带主机名和角色名，
     // 那些不该出现在公开接口的响应里。而 code 足够定位问题——28P01 是密码错、
     // ECONNREFUSED 是连不上、ETIMEDOUT 是网络不通。
-    const code =
-      caught instanceof Error && "code" in caught
-        ? String((caught as { code?: unknown }).code)
-        : undefined;
-
     console.error("[api/fx] 查询失败", caught);
 
     return Response.json(
-      { error: "查询汇率数据失败", code: code ?? null },
+      { error: "查询汇率数据失败", ...describeFailure(caught) },
       { status: 500 },
     );
   }
