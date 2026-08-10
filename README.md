@@ -176,13 +176,23 @@ curl "http://localhost:3000/api/fx?quote=SEK,CNY&from=2024-01&to=2024-03"
 
 **1. 配置环境变量**（Project Settings → Environment Variables）
 
-生产环境**只需要 `DATABASE_URL` 一条**，照本地 `.env.local` 填。
+生产环境需要**两条**：
 
-`DIRECT_DATABASE_URL` 不用配：它只给本地 drizzle-kit 跑迁移用，运行时一行代码都
-不读它。生产环境不跑迁移，配上去只是多存一个用不到的数据库密钥。
+| 变量 | 说明 |
+|---|---|
+| `DATABASE_URL` | 照本地 `.env.local` 填 |
+| `CRON_SECRET` | **必须手动添加**。Vercel 不会自动创建它 |
 
-`CRON_SECRET` 由 Vercel 在启用 Cron 时自动注入，**但部署后要实测确认**。若未注入，
-cron 触发会因鉴权失败拿到 401，而这种失败在控制台上看起来只是「任务跑过了」。
+`CRON_SECRET` 的机制是：你把它加进项目环境变量，Vercel 触发 cron 时就会把这个值
+作为 `Authorization: Bearer <值>` 发过来，端点自己比对。少了它，构建会直接失败——
+因为 `src/lib/env.ts` 在模块加载时校验，而 `next build` 收集路由数据时会加载到它。
+
+`DIRECT_DATABASE_URL` **不用配**：它只给本地 drizzle-kit 跑迁移用，运行时一行代码
+都不读它。生产环境不跑迁移，配上去只是多存一个用不到的数据库密钥。
+
+> Hobby 计划的两条 cron 限制：每个 cron 最多每天触发一次（更频繁的表达式会让
+> **部署失败**）；且实际触发时间在指定的那个小时内浮动，`0 4 * * *` 可能落在
+> 04:00 到 04:59 之间的任意时刻。
 
 **2. 函数区域**
 
