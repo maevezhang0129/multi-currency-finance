@@ -2,6 +2,8 @@
 
 一个多币种个人财务分析工具：**账本数据只留在你自己的浏览器里，后端只负责公共汇率数据。**
 
+**线上地址**：https://multi-currency-finance.vercel.app
+
 ---
 
 ## 架构
@@ -313,10 +315,10 @@ THB 会占满纵向空间，另外两条被压成近似水平的直线——图�
 
 - [x] 项目初始化：Next.js + TS strict + Drizzle + Supabase 连通
 - [x] 汇率抓取（Frankfurter + 错误分类与退避重试 + 幂等 upsert）
-- [x] Vercel Cron 月度触发（代码与配置就绪，**尚未在线上验证**）
 - [x] `/api/fx` 查询接口（zod 校验入参、结构化 JSON、CDN 缓存头）
 - [x] 汇率趋势图（加载 / 空数据 / 错误三态）
-- [ ] 部署到 Vercel，验证 cron 真的被触发
+- [x] 部署到 Vercel，函数区域已确认落在首尔（`x-vercel-id: …::icn1::…`）
+- [ ] Vercel Cron 首次实际触发验证（代码与配置就绪，尚未跑过一次真实调度）
 - [ ] 前端本地账本：localStorage、CSV 导入、冻结折算、双币种视角
 
 库里已有 2019-01 至 2026-07 共 273 条月度汇率（91 个月 × 3 个币种）。
