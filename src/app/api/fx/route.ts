@@ -2,6 +2,7 @@ import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 
 import { db } from "@/db";
 import { fxRates } from "@/db/schema";
+import { serverEnv } from "@/lib/env";
 import type { FxResponse, FxSeriesPoint } from "@/lib/fx/api-types";
 import { parseFxQuery } from "@/lib/fx/query";
 
@@ -35,6 +36,25 @@ function describeFailure(caught: unknown): { name: string | null; code: string |
     name: caught instanceof Error ? caught.name : null,
     code: null,
   };
+}
+
+/**
+ * 连接目标的粗粒度描述，只在出错时返回。
+ *
+ * 只取域名最后两段加端口，足以区分连的是哪种 Supabase 端点：
+ * `supabase.com:6543` 是 transaction pooler（有 IPv4，serverless 能连），
+ * `supabase.co:5432` 是 direct connection（只有 IPv6，会报 ENOTFOUND）。
+ *
+ * 项目 ref、用户名、密码都不会出现在这里。
+ */
+function describeTarget(): string {
+  try {
+    const url = new URL(serverEnv.DATABASE_URL);
+    const suffix = url.hostname.split(".").slice(-2).join(".");
+    return `${suffix}:${url.port || "(默认)"}`;
+  } catch {
+    return "(连接串无法解析)";
+  }
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -78,7 +98,7 @@ export async function GET(request: Request): Promise<Response> {
     console.error("[api/fx] 查询失败", caught);
 
     return Response.json(
-      { error: "查询汇率数据失败", ...describeFailure(caught) },
+      { error: "查询汇率数据失败", ...describeFailure(caught), target: describeTarget() },
       { status: 500 },
     );
   }
