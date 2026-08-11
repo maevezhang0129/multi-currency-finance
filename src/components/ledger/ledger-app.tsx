@@ -14,6 +14,11 @@ import {
 } from "@/lib/ledger/convert";
 import { formatAmount, formatMonthLabel } from "@/lib/ledger/format";
 import { toCsv } from "@/lib/ledger/csv";
+import {
+  ensurePersistentStorage,
+  registerServiceWorker,
+  type PersistState,
+} from "@/lib/ledger/persistence";
 import { exportRaw, type KeyValueStore } from "@/lib/ledger/storage";
 import { changePercent, entriesInMonth, recentEntries, summarizeMonth } from "@/lib/ledger/summary";
 import {
@@ -77,6 +82,19 @@ export function LedgerApp() {
    * 都会走到这里。
    */
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [persist, setPersist] = useState<PersistState>({ status: "unknown" });
+
+  /*
+   * 注册 service worker，并申请持久化存储。
+   *
+   * 两件事都不阻塞任何功能：service worker 只影响能否离线打开，
+   * 持久化只影响数据会不会被浏览器在空间紧张时清理。失败了应用照常能用，
+   * 所以这里只记录状态、由设置页如实呈现，不弹窗打扰。
+   */
+  useEffect(() => {
+    registerServiceWorker();
+    void ensurePersistentStorage().then(setPersist);
+  }, []);
 
   // 取汇率。失败不阻塞记账——拿不到汇率只是折算不了，账还是要能记。
   useEffect(() => {
@@ -472,6 +490,12 @@ export function LedgerApp() {
                 CSV 可以用 Excel 打开、修改，再导回来。原始备份是完整快照，
                 用于换设备时原样恢复。
               </p>
+
+              {/*
+                存储状态如实告知。用户把几个月的账记在这里，有权知道浏览器
+                会不会在某天清掉它——而不是等真的丢了才发现。
+              */}
+              <StorageStatus state={persist} />
             </div>
 
             <CsvImport
@@ -569,6 +593,24 @@ function downloadCsv(entries: readonly Entry[]) {
 
 function downloadExport(store: KeyValueStore) {
   download(exportRaw(store), `账本备份-${new Date().toISOString().slice(0, 10)}.json`);
+}
+
+/** 数据保护状态。不确定时不说话，比给一个含糊的安慰强。 */
+function StorageStatus({ state }: { state: PersistState }) {
+  if (state.status === "unknown") return null;
+
+  const text =
+    state.status === "persisted"
+      ? "浏览器已批准持久化存储：账本不会在空间紧张时被自动清理，只有你主动清除才会消失。"
+      : state.status === "best-effort"
+        ? "浏览器尚未批准持久化存储。多用几次、或把应用添加到主屏幕之后通常会自动批准。在那之前，建议定期导出备份。"
+        : "这个浏览器不支持查询存储保护状态。建议定期导出备份。";
+
+  return (
+    <p className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-xs text-ink-muted">
+      {text}
+    </p>
+  );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
