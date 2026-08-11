@@ -65,6 +65,18 @@ export function LedgerApp() {
   const [view, setView] = useState<"overview" | "list" | "settings">("overview");
   /** null = 关闭；"new" = 新增；否则是正在编辑的那条记录 */
   const [sheet, setSheet] = useState<"new" | Entry | null>(null);
+  /*
+   * 写入失败的提示。
+   *
+   * React 的 error boundary（error.tsx）只接渲染期的异常，**接不住事件处理
+   * 函数里抛的错**。保存是在 onClick 里发生的，所以它必须自己兜住——否则
+   * 用户点了保存、什么都没存下，界面却装作一切正常。这是这个项目最不能接受
+   * 的失败方式：静默地丢掉用户的数据。
+   *
+   * 实测触发过：localStorage 满了、crypto.randomUUID 不可用（非安全上下文）
+   * 都会走到这里。
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // 取汇率。失败不阻塞记账——拿不到汇率只是折算不了，账还是要能记。
   useEffect(() => {
@@ -132,6 +144,7 @@ export function LedgerApp() {
 
   const upsertEntry = useCallback(
     (draft: EntryDraft, existing: Entry | null) => {
+      try {
       const conversion =
         rates === null
           ? null
@@ -163,15 +176,34 @@ export function LedgerApp() {
 
       saveEntries({ ...base, entries: next });
       setSheet(null);
+      setSaveError(null);
+      } catch (caught) {
+        // 保留浮层不关，用户刚填的内容不至于白填
+        console.error("[ledger] 保存失败", caught);
+        setSaveError(
+          caught instanceof Error ? caught.message : "保存失败，原因不明",
+        );
+      }
     },
     [ledger, rates, saveEntries],
   );
 
   const deleteEntry = useCallback(
     (id: string) => {
-      const base = ledger.status === "ok" ? ledger.value : emptyLedger();
-      saveEntries({ ...base, entries: base.entries.filter((e) => e.id !== id) });
-      setSheet(null);
+      try {
+        const base = ledger.status === "ok" ? ledger.value : emptyLedger();
+        saveEntries({
+          ...base,
+          entries: base.entries.filter((e) => e.id !== id),
+        });
+        setSheet(null);
+        setSaveError(null);
+      } catch (caught) {
+        console.error("[ledger] 删除失败", caught);
+        setSaveError(
+          caught instanceof Error ? caught.message : "删除失败，原因不明",
+        );
+      }
     },
     [ledger, saveEntries],
   );
@@ -234,7 +266,7 @@ export function LedgerApp() {
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">
       <main className="flex-1 px-6 pb-28">
-        <header className="flex items-center justify-between pt-10 pb-8">
+        <header className="safe-top flex items-center justify-between pb-8">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -285,6 +317,20 @@ export function LedgerApp() {
 
         {view === "overview" ? (
         <>
+        {/* 写入失败必须说出来。不说的话，用户以为记上了，其实没有。 */}
+        {saveError !== null ? (
+          <div
+            role="alert"
+            className="mb-6 rounded-lg border border-border-strong px-3 py-2.5"
+          >
+            <p className="text-sm text-ink">这一笔没能保存</p>
+            <p className="mt-1 text-xs text-ink-muted">
+              数据没有被改动。可以重试；如果一直失败，先导出备份。
+            </p>
+            <p className="mt-1 font-mono text-xs text-ink-subtle">{saveError}</p>
+          </div>
+        ) : null}
+
         <section className="pb-10">
           <p className="tnum flex items-baseline gap-2 whitespace-nowrap text-ink">
             <span className={`${heroSizeClass(total)} font-semibold tracking-tight`}>
@@ -442,7 +488,7 @@ export function LedgerApp() {
 
       {/* 设置页不显示这个按钮：它会盖住页面底部的导出按钮，而且在设置页里也没有意义 */}
       <div
-        className={`pointer-events-none sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent px-6 pt-8 pb-6 ${
+        className={`pointer-events-none sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent safe-bottom px-6 pt-8 ${
           view === "settings" ? "hidden" : ""
         }`}
       >

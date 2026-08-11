@@ -78,6 +78,21 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
+/*
+ * 安全区。装到主屏幕全屏运行后，页面会延伸到刘海和底部横条下面
+ * （viewport-fit=cover），不留出这段距离的话，底部的「记一笔」按钮会被
+ * iPhone 的home 横条压住，点不到。
+ *
+ * 浏览器里打开时这些值是 0，所以不影响非全屏的情况。
+ */
+.safe-bottom {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
+
+.safe-top {
+  padding-top: max(2.5rem, env(safe-area-inset-top));
+}
+
 /* 金额一律等宽数字，否则每次数字变化列宽都在跳。 */
 .tnum {
   font-variant-numeric: tabular-nums;

@@ -252,3 +252,30 @@ describe("导出", () => {
     expect(typeof dump.exportedAt).toBe("string");
   });
 });
+
+describe("账本版本迁移", () => {
+  it("当前版本正常读取", () => {
+    const store = memoryStore({
+      "mcf.ledger": JSON.stringify(ledgerWith(validEntry())),
+    });
+    expect(loadLedger(store).status).toBe("ok");
+  });
+
+  it("不认识的版本仍判为 corrupt，绝不猜着读", () => {
+    // 装作能读懂一个不认识的格式，比明确报错危险得多：前者会静默改写用户的
+    // 财务记录，后者只是显示一条错误，而原始数据还在。
+    const store = memoryStore({
+      "mcf.ledger": JSON.stringify({ version: 7, entries: [] }),
+    });
+    const result = loadLedger(store);
+    expect(result.status).toBe("corrupt");
+    if (result.status !== "corrupt") return;
+    // 原文必须保留，用户还要靠它救数据
+    expect(result.raw).toContain('"version":7');
+  });
+
+  it("迁移路径上出问题时，返回的仍是原始的 corrupt 结果", () => {
+    const store = memoryStore({ "mcf.ledger": "{ 根本不是 JSON" });
+    expect(loadLedger(store).status).toBe("corrupt");
+  });
+});

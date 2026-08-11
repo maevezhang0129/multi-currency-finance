@@ -4,14 +4,14 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import {
   browserStore,
+  parseLedger,
   parseSettings,
-  parseStored,
   saveLedger,
   saveSettings,
   type KeyValueStore,
   type LoadResult,
 } from "./storage";
-import { ledgerSchema, type Ledger, type Settings } from "./types";
+import type { Ledger, Settings } from "./types";
 
 /**
  * 把 localStorage 当作外部数据源订阅，而不是在 effect 里读一次塞进 state。
@@ -84,9 +84,9 @@ export function useLedger(): LedgerAccess {
 
   const store = useMemo(() => (hydrated ? browserStore() : null), [hydrated]);
 
-  // 直接解析订阅到的原始字符串，依赖是真实的：内容变了才重新解析。
+  // 走带迁移的解析。依赖是真实的：内容变了才重新解析。
   const ledger = useMemo<LoadResult<Ledger>>(
-    () => parseStored(rawLedger, ledgerSchema),
+    () => parseLedger(rawLedger),
     [rawLedger],
   );
 

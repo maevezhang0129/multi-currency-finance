@@ -91,8 +91,85 @@ export function parseStored<T>(
   return { status: "ok", value: result.data };
 }
 
+/**
+ * 账本的版本迁移。
+ *
+ * 现在只有 v1，所以这个函数看起来是多余的——但它存在的时机恰恰是现在。
+ * 等真的要给记录加字段（账户、标签、附件）时，版本号一改，用户手里所有
+ * 老数据会立刻被判成「损坏」。到那时再补迁移，得先想清楚怎么在不破坏
+ * 已有数据的前提下改，压力大得多。
+ *
+ * 迁移链的写法：每个 migrator 只负责把 n 升到 n+1，逐级串起来。
+ * 这样加第三个版本时不用改前两个。
+ *
+ * 没有服务端可以帮忙做迁移——数据在用户浏览器里，只能在读的那一刻升级。
+ */
+type Migration = {
+  /** 这个 migrator 认得的旧版本号 */
+  from: number;
+  /** 认出旧格式；认不出就返回 null，交给下一个 */
+  detect: (raw: unknown) => boolean;
+  /** 升到下一个版本 */
+  upgrade: (raw: unknown) => unknown;
+};
+
+const LEDGER_MIGRATIONS: Migration[] = [
+  // 例（等真的有 v2 时照这个写）：
+  // {
+  //   from: 1,
+  //   detect: (raw) =>
+  //     typeof raw === "object" && raw !== null && (raw as { version?: number }).version === 1,
+  //   upgrade: (raw) => ({
+  //     ...(raw as object),
+  //     version: 2,
+  //     entries: (raw as { entries: unknown[] }).entries.map((e) => ({
+  //       ...(e as object),
+  //       account: "默认",   // 新字段给一个不改变语义的默认值
+  //     })),
+  //   }),
+  // },
+];
+
+/**
+ * 逐级升级，直到当前版本能解析为止。
+ *
+ * 升级失败或没有对应的 migrator 时，返回原始的 corrupt 结果——**绝不猜**。
+ * 装作能读懂一个不认识的格式，比明确报错危险得多：前者会静默地改写用户的
+ * 财务记录，后者只是让他看到一条错误信息，而原始数据还在。
+ */
+export function parseLedger(raw: string | null): LoadResult<Ledger> {
+  const current = parseStored(raw, ledgerSchema);
+  if (current.status !== "corrupt") return current;
+  if (raw === null) return current;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    // 连 JSON 都不是，迁移无从谈起
+    return current;
+  }
+
+  // 最多走 10 级，防止 migrator 写错造成死循环
+  for (let step = 0; step < 10; step += 1) {
+    const migration = LEDGER_MIGRATIONS.find((m) => m.detect(payload));
+    if (migration === undefined) break;
+
+    try {
+      payload = migration.upgrade(payload);
+    } catch {
+      return current;
+    }
+
+    const upgraded = ledgerSchema.safeParse(payload);
+    if (upgraded.success) return { status: "ok", value: upgraded.data };
+  }
+
+  return current;
+}
+
 export function loadLedger(store: KeyValueStore): LoadResult<Ledger> {
-  return parseStored(store.getItem(LEDGER_KEY), ledgerSchema);
+  return parseLedger(store.getItem(LEDGER_KEY));
 }
 
 /**
