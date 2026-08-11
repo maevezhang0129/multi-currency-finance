@@ -21,6 +21,26 @@ exists to answer it.
 
 ---
 
+## Why this exists, and what I left out
+
+**Built for one user: me.** A known audience of one is a scoping tool, not a
+limitation — it is what makes it cheap to say no.
+
+**What made me stop using the alternatives.** They convert past transactions at
+today's rate. Open the app a week later and last year's spending has quietly
+changed. That is defensible for a net-worth figure and useless for the question I
+actually have, which is *did my own habits change* — a question that only means
+anything if the past holds still. Hence
+[frozen conversions](#two-converted-amounts-freeze-and-never-recompute), the one
+decision this whole project is organised around.
+
+**What I cut:** accounts, budgets, bank sync, shared ledgers, AI suggestions. The
+first pays for the rest — no accounts means no auth, no password resets, and no
+database of other people's finances to lose. That single subtraction is why a
+one-person project can be finished rather than perpetually half-built.
+
+---
+
 ## What it does
 
 **Track**
