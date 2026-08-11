@@ -1,372 +1,263 @@
 # Multi-Currency Finance
 
-**一个自己每天在用的多币种记账工具。账本数据只留在你的浏览器里，永远不上传。**
+**English** · [中文](README.zh-CN.md)
 
-[线上试用](https://multi-currency-finance.vercel.app) · [设计取舍](#设计取舍) · [它是怎么写的](#关于这个项目是怎么写的)
+A personal expense tracker for people whose money lives in more than one currency.
+**Your ledger never leaves your browser — the backend only ever handles public exchange rates.**
 
-<p align="center">
-  <img src="docs/screenshots/home-light.png" width="300" alt="首页：本月支出概览、分类分布、最近记录" />
-  <img src="docs/screenshots/entry-sheet.png" width="300" alt="记一笔：金额自动聚焦、分类一排标签、三次点击完成" />
-</p>
+[![CI](https://github.com/maevezhang0129/multi-currency-finance/actions/workflows/ci.yml/badge.svg)](https://github.com/maevezhang0129/multi-currency-finance/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-在瑞典生活、偶尔去泰国、收入和资产还牵着人民币——这种情况下，「这个月花了多少」
-不是一个能直接回答的问题。这个工具想解决的就是它。
-
----
-
-## 它能做什么
-
-**记账**
-- 三次点击记完一笔：点开 → 输金额 → 选分类 → 保存
-- 支出与收入分开，各有各的分类
-- 按月查看，可翻月；明细按天分组，点任意一条改或删
-- 分类完全自定义：增删改排序，改名会同步更新已有记录
-
-**多币种**
-- 花的是泰铢，看到的是「1,250 THB ≈ 37.30 USD」
-- 折算用**交易发生那个月**的汇率，算出后冻结，永不因为今天汇率变了而改写
-- 当月汇率还不存在时用最近可得的做临时折算并标明，月份结束后自动重算并冻结
-
-**数据是你的**
-- 全部存在浏览器 localStorage，后端一个字节都读不到
-- 随时导出 CSV（Excel 能直接打开）或完整备份
-- CSV 导入支持列名不一致：自动猜 + 手动指定 + 预览确认
-
-**汇率**
-- 每月一次定时任务从欧洲央行参考汇率抓取，聚合成当月均值入库
-- 趋势图用小倍数呈现，三个币种各一张（[为什么不是一张三条线的图](#七三张图而不是一张三条线的图)）
+**[→ Try it live](https://multi-currency-finance.vercel.app)**
 
 <p align="center">
-  <img src="docs/screenshots/csv-import.png" width="440" alt="CSV 导入：列名对不上时手动指定，预览确认后再写入" />
-  <img src="docs/screenshots/list-dark.png" width="300" alt="明细列表，深色模式" />
+  <img src="docs/screenshots/home-light.png" width="300" alt="Monthly overview: total spend, category breakdown, recent entries" />
+  <img src="docs/screenshots/entry-sheet.png" width="300" alt="Add an entry: amount focused on open, categories as one row of chips" />
+</p>
+
+If you live in Sweden, travel to Thailand, and still hold assets in China, *"how
+much did I spend this month"* stops being a question with one answer. This tool
+exists to answer it.
+
+---
+
+## What it does
+
+**Track**
+- Three taps to log an expense: open → type amount → pick category → save
+- Income and expenses have separate category lists
+- Browse by month; entries grouped by day; tap any row to edit or delete
+- Categories are fully editable — add, remove, reorder, rename (renaming updates existing entries)
+
+**Multi-currency**
+- Spend 1,250 THB, see `≈ 37.30 USD` next to it
+- Conversion uses the rate for **the month the transaction happened**, then freezes.
+  A purchase from last year never silently changes because today's rate moved
+- The current month has no monthly average yet, so those entries are converted
+  provisionally, labelled as such, and recomputed once the month closes
+
+**Your data stays yours**
+- Everything lives in browser `localStorage`. The server cannot read it, by design
+- Export to CSV (opens cleanly in Excel) or a full JSON backup, any time
+- CSV import handles column names that don't match — auto-detect, manual mapping, preview before writing
+
+**Exchange rates**
+- A monthly cron pulls ECB reference rates and stores the month's average
+- Trend chart uses small multiples — one panel per currency ([why not one chart with three lines](#four-three-charts-not-one-chart-with-three-lines))
+
+<p align="center">
+  <img src="docs/screenshots/csv-import.png" width="430" alt="CSV import: mapping unmatched columns, then a preview showing what will happen" />
+  <img src="docs/screenshots/list-dark.png" width="290" alt="Entry list, dark mode" />
 </p>
 
 <p align="center">
-  <sub>左：一份列名全是英文的账单，自动认出两列、手动指定两列，预览里写明「3 条会导入、1 条重复、2 条读不懂」<br/>
-  右：明细按天分组，每天有小计</sub>
+  <sub>Left: a statement with English column names — two columns auto-detected, two mapped by hand,
+  and a preview that states plainly "3 will import, 1 duplicate, 2 unreadable."<br/>
+  Right: entries grouped by day, with a per-day subtotal.</sub>
 </p>
 
 ---
 
-## 关于这个项目是怎么写的
+## Design decisions worth defending
 
-**这是一个 AI 辅助开发的项目，从第一行代码到上线全程用 Claude Code 完成。**
-仓库里的 [`CLAUDE.md`](CLAUDE.md) 就是我给它的工作说明——技术选型、架构原则、
-领域规则、工作规范，以及踩过的坑。
+The full list lives in the [Chinese README](README.zh-CN.md#设计取舍). These four
+carry the most weight.
 
-把它留在仓库里是刻意的。我认为在这个阶段，**能把一个 AI 指挥成「按工程标准交付」
-比自己敲完每一行更值得展示**。具体来说，过程中我做的事是：
+### One. The ledger never touches the database
 
-- **定规则并让它守住**。比如「用户账本数据永不入库」这条，不是一句口号——
-  它在代码里有构建期保障（`server-only`），在数据库里有 RLS 兜底。
-- **在方向错的时候拉回来**。项目最初的定位是「全栈能力展示」，功能宁少勿多；
-  做完汇率链路后我把目标改成「做一个真的能用的账本」，`CLAUDE.md` 里保留了
-  这次修订和原因。
-- **拒绝含糊的实现**。「汇率影响」那一行至今没做，因为我们没想清楚它到底该拿
-  哪两个口径相减——宁可不显示，也不给一个看起来精确、实际讲不清的数。
-- **要求每个结论都有证据**。README 里所有「实测」字样都对应真实跑过的验证，
-  不是推测。比如数据源的限流特性、Vercel 函数落在哪个区、CSV 的脏数据处理。
+Financial records live only in `localStorage` and in files the user exports.
+The backend cannot read them.
 
-commit 历史是完整的，包括几次判断错误和纠正——例如 CSV 导入最初逐行按正负号
-判断收支方向，导致一份全是正数的支出账单被整份判成收入，被测试当场拦下。
+**Why not store them?** The moment financial data hits a database, the project
+inherits encryption at rest, key rotation, backup policy, cross-border compliance,
+and breach notification. An open-source side project can't honour any of those —
+and users don't get hurt any less because it was "just a portfolio piece."
+
+**What it buys.** No user data → no accounts → no password hashing, no session
+management, no OAuth callbacks, no broken access control. One architectural
+decision removes the single largest source of security incidents in a full-stack app.
+
+This isn't maintained by discipline alone. Two mechanical guardrails enforce it:
+
+1. `src/db/index.ts` and `src/lib/env.ts` both start with `import "server-only"`.
+   Any code path that pulls the database or secrets into a client component
+   **fails at build time**, not at runtime after the connection string has already
+   shipped in a browser bundle.
+2. The `fx_rates` table has RLS enabled with **no policies**. Supabase exposes
+   `public` schema tables through PostgREST to the anon key by default; with RLS on
+   and no policy, that role reads nothing. The only way in or out is our own API.
+
+### Two. Converted amounts freeze, and never recompute
+
+Each transaction is converted using the rate for the month it happened, then stored.
+Later rate updates don't touch it.
+
+The alternative — recomputing history with today's rate — means the user opens the
+app each morning and finds last year's numbers have changed. A past that already
+happened shouldn't be rewritten by today's FX market.
+
+This collides with reality: the cron only ingests **completed** months, so an expense
+logged today has no monthly average yet. Rather than pick between showing nothing
+(half the information missing) or reusing last month's rate as if it were this
+month's (a lie), conversions carry a `frozen` flag. Provisional ones are labelled in
+the UI and recomputed exactly once, when the real average lands.
+
+### Three. Money is never a JavaScript number
+
+Amounts and rates are strings end to end; arithmetic goes through a small BigInt
+decimal module. Binary floating point cannot represent `0.1`, and the error
+compounds — one cent at a time — until a monthly total is off in a way nobody can
+explain.
+
+Three tests exist purely as tripwires, each a case floating point gets wrong:
+`0.1 × 3`, `1.005 × 100`, and `0.1` summed a hundred times. Any `Number()` slipped
+into that path fails them immediately.
+
+### Four. Three charts, not one chart with three lines
+
+USD buys roughly 9.6 SEK, 33 THB, and 6.8 CNY. Plotted on one linear axis, THB
+owns the vertical space and the other two flatten into near-horizontal lines — the
+chart is still there, the information isn't. A dual axis is worse: how the two
+scales align is arbitrary, so the picture invents a correlation the data doesn't have.
+
+So: small multiples. One panel per currency, each with its own axis, aligned
+vertically so shapes stay comparable while every number remains a real rate.
+Indexing all three to 100 at a base period would also work, but then "how many
+kronor is a dollar" — the number that actually matters when you're logging an
+expense — disappears.
+
+Chart colours were run through a contrast/CVD validator rather than picked by eye,
+in both light and dark. Dark mode is a separately chosen set of steps, not an
+inversion.
 
 ---
 
-## 现在的状态
+## How this was built
 
-| | |
-|---|---|
-| 线上 | https://multi-currency-finance.vercel.app |
-| 测试 | 219 个，集中在纯函数层 |
-| 代码 | 约 5,200 行源码 + 2,100 行测试 |
-| CI | GitHub Actions：typecheck / lint / test |
+**This project was written end to end with Claude Code.** [`CLAUDE.md`](CLAUDE.md)
+in the repo is the working brief I gave it: stack choices, architectural
+constraints, domain rules, and a running list of things that turned out to be traps.
 
-已完成：汇率抓取链路（含定时任务、幂等写入、线上触发验证）、查询接口、趋势图、
-账本录入与编辑、自定义分类、CSV 导入导出。
+Keeping it in the repo is deliberate. I think the more interesting thing to show
+right now isn't that I can type the code — it's whether I can direct a model to
+ship something that holds up to engineering review. Concretely, my job in this
+project was:
 
-未做：「汇率影响」单独一行——定义尚未想清楚。
+- **Set constraints and make them stick.** "Ledger data never reaches the database"
+  isn't a slogan; it's enforced by `server-only` at build time and RLS at the
+  database.
+- **Correct course when it drifted.** This started as a "full-stack showcase" where
+  features were deliberately minimal. After the exchange-rate pipeline shipped I
+  changed the goal to "build a ledger I actually use daily," and `CLAUDE.md` records
+  the revision and the reason.
+- **Refuse vague implementations.** The "FX impact" line is still unbuilt, because
+  we couldn't settle what two quantities it should subtract. A number that looks
+  precise but can't be explained is worse than no number.
+- **Demand evidence over assertion.** Every "measured" claim in these docs maps to
+  something actually run — the data source's rate-limiting behaviour, which region
+  the functions land in, how the CSV parser handles real-world mess.
+
+The commit history is intact, including the wrong turns. One example: CSV import
+originally inferred expense-vs-income row by row from the amount's sign, which
+classified an entire statement of positive expenses as income. The test suite
+caught it on the first run.
 
 ---
 
-## 技术栈
+## Architecture
 
-| 层 | 选型 | 为什么 |
+```
+┌─ Browser ─────────────────────────────────────────────┐
+│  ledger entries → localStorage  ·  exported files      │
+│  conversion & aggregation run here, on-device          │
+└───────────────────────▲───────────────────────────────┘
+                        │  monthly rates, read-only
+        ════════════════╪════════════════  trust boundary
+                        │  ledger data never crosses downward
+┌─ Backend ─────────────┴───────────────────────────────┐
+│  Vercel Cron → Frankfurter (ECB) → monthly average     │
+│              → Postgres (one table) → GET /api/fx      │
+└────────────────────────────────────────────────────────┘
+```
+
+The backend handles exactly one kind of data: public exchange rates, identical for
+everyone. It has no concept of a user.
+
+**Pure functions carry the logic; IO stays thin.** Month arithmetic, decimal money,
+conversion policy, aggregation, batching, CSV parsing and import planning are all
+side-effect free and covered by tests. The pieces that talk to the network,
+the database, or `localStorage` are deliberately small.
+
+---
+
+## Stack
+
+| Layer | Choice | Why |
 |---|---|---|
-| 全栈框架 | Next.js 16（App Router） | 前后端同仓库，一次部署，Route Handler 与页面共享类型 |
-| 语言 | TypeScript（strict） | 额外开了 `noUncheckedIndexedAccess`，代码中不出现 `any` |
-| 数据库 | Supabase（Postgres） | 托管 Postgres + 免费额度，只存公共汇率数据 |
-| ORM | Drizzle | schema 即 TypeScript，迁移是可审查的 SQL 文件而非黑盒 |
-| 定时任务 | Vercel Cron | 与部署同仓库配置，无需额外基础设施 |
-| 图表 | Recharts | |
-| 部署 | Vercel | |
+| Framework | Next.js 16 (App Router) | One repo, one deploy, shared types across the boundary |
+| Language | TypeScript (strict) | Plus `noUncheckedIndexedAccess`; no `any` anywhere |
+| Database | Supabase (Postgres) | Managed Postgres with a free tier; stores only public rate data |
+| ORM | Drizzle | Schema is TypeScript; migrations are reviewable SQL, not a black box |
+| Scheduling | Vercel Cron | Configured in the repo, no extra infrastructure |
+| Charts | Recharts | |
+| Hosting | Vercel | Functions pinned to `icn1` to sit beside the database |
 
-## 本地运行
+**219 tests**, concentrated in the pure-function layer. CI runs typecheck, lint,
+and tests on every push.
 
-需要 Node 22（仓库有 `.nvmrc`，`nvm use` 即可）。
+---
+
+## Running locally
+
+Requires Node 22 (see `.nvmrc`).
 
 ```bash
 npm install
-cp .env.example .env.local     # 然后填入真实连接串
-npm run db:migrate             # 建表
+cp .env.example .env.local   # fill in your Supabase connection strings
+npm run db:migrate
 npm run dev
 ```
 
-### 关于两条连接串
-
-`.env.example` 里有两个变量，它们不是同一条串，用途也不能互换：
-
-- `DATABASE_URL` —— Supavisor **transaction pooler（6543）**。应用运行时用。
-  serverless 函数实例频繁创建销毁，直连会打满 Postgres 的连接上限。
-  代价是这个模式不支持 prepared statement，所以驱动侧必须 `prepare: false`。
-- `DIRECT_DATABASE_URL` —— **Session pooler 或 direct connection**。只有本地跑
-  drizzle-kit 时用，应用运行时不读它。
-
-  分开不是因为迁移在 transaction pooler 上跑不了——drizzle 的 migrator 把迁移包在
-  一个事务里，实测能正常应用。真正的原因是那条路有个够不着的天花板：
-  `CREATE INDEX CONCURRENTLY` 不能在事务内执行，而 transaction 模式下每条语句都
-  身处事务。等到表大得需要不锁表加索引时，迁移会卡死在这里。把出口预留好，比
-  撞上了再回来改配置便宜。
-
-两条串都在 Supabase 控制台的 **Connect** 按钮里（也可从 Project Settings → Database
-进入）。direct connection 默认只有 IPv6；本机没有全局 IPv6 地址时用 Session
-pooler 那条（IPv4，全 tier 可用）。
-
-<details>
-<summary>连不上？先确认不是本地网络的问题</summary>
-
-不少网络环境（公司防火墙、部分代理节点）会封 **5432**，而 6543 放行。症状是
-TCP 连接能建立、随即被对端关闭且不返回任何字节，客户端表现为长时间挂起。
-
-判断方法：**不要用 `nc -z`**。在 fake-IP 模式的代理下，本地代理会先接受连接，
-`nc` 一律报"通"，是假阳性。改用 Postgres 协议探测——发一个 SSLRequest 包，
-服务器回 `S` 才说明真的连到了 Postgres：
-
-```bash
-python3 - <<'PY'
-import socket, struct
-s = socket.create_connection(("<host>", 5432), timeout=15); s.settimeout(15)
-s.sendall(struct.pack("!ii", 8, 80877103))
-print(repr(s.recv(1)))   # b'S' = 真的连到 Postgres；b'' = 上游没通
-PY
-```
-
-拿一台第三方公开 Postgres 做对照（例如 `hh-pgsql-public.ebi.ac.uk:5432`），
-如果它也是同样症状，那就是本地网络封了这个端口，与 Supabase 无关。
-
-绕过办法：本地迁移临时把 `DIRECT_DATABASE_URL` 指向 6543 那条。drizzle 的
-migrator 在 transaction 模式下能正常工作，只是碰不了 `CREATE INDEX CONCURRENTLY`。
-
-</details>
-
-### 脚本
-
-| 命令 | 作用 |
-|---|---|
-| `npm run dev` | 开发服务器 |
-| `npm run typecheck` | `next typegen` + `tsc --noEmit` |
-| `npm run lint` | ESLint |
-| `npm run db:generate` | 由 schema 生成迁移 SQL |
-| `npm run db:migrate` | 应用迁移 |
-| `npm run db:studio` | Drizzle Studio |
-
----
+The ledger works without any backend — rates simply show as unavailable and
+conversions are filled in later. See the [Chinese README](README.zh-CN.md#本地运行)
+for the connection-string details and a network troubleshooting guide.
 
 ## API
 
-后端只暴露一个查询接口。它提供的是公共汇率数据，不涉及任何用户信息，因此不需要
-鉴权。
-
-### `GET /api/fx`
-
-| 参数 | 必填 | 默认 | 说明 |
-|---|---|---|---|
-| `base` | 否 | `USD` | 基准币。目前只支持 `USD`，传别的返回 400 |
-| `quote` | 否 | `SEK,THB,CNY` | 报价币，逗号分隔可多个。只接受已跟踪的币种 |
-| `from` | 否 | 不设下界 | 起始月份，`YYYY-MM` |
-| `to` | 否 | 不设上界 | 结束月份，`YYYY-MM` |
-
-全部可省略，所以裸调 `/api/fx` 就能拿到完整数据——前端不必先知道有哪些币种。
+One endpoint. It serves public rate data and needs no authentication.
 
 ```bash
-curl "http://localhost:3000/api/fx?quote=SEK,CNY&from=2024-01&to=2024-03"
+curl "https://multi-currency-finance.vercel.app/api/fx?quote=SEK,CNY&from=2024-01&to=2024-03"
 ```
 
 ```jsonc
 {
   "base": "USD",
-  "from": "2024-01",          // 请求时省略则为 null
+  "from": "2024-01",
   "to": "2024-03",
-  "series": [                 // 顺序与请求给定的币种顺序一致
-    {
-      "quote": "SEK",
-      "points": [             // 按月份升序；该币种无数据时为空数组
-        { "month": "2024-01", "rate": "10.4012857143" }
-      ]
-    }
+  "series": [
+    { "quote": "SEK", "points": [{ "month": "2024-01", "rate": "10.4012857143" }] }
   ]
 }
 ```
 
-**`rate` 是字符串，不是数字。** 库里是 `numeric`，Drizzle 映射为 `string` 正是为了
-不丢精度；在 API 边界上转成 `number`，精度就没了且补不回来。要画图时再转，
-转出来的是展示值。
-
-**状态码**
-
-| 码 | 何时 |
-|---|---|
-| 200 | 正常。**区间内没有数据也是 200**，`points` 为空数组 |
-| 400 | 入参不合法。响应体的 `details` 指明是哪个字段错 |
-
-区间内无数据不用 404：`/api/fx?from=1990-01` 是一个完全合法的问题，答案恰好是空。
-用 404 会让调用方分不清「没数据」和「路径写错了」，而这两种情况在界面上是两种
-完全不同的呈现。
-
-**缓存**：`public, max-age=0, s-maxage=86400, stale-while-revalidate=604800`。
-汇率一个月才变一次，没必要每次请求都打一遍数据库。
-
-## 部署
-
-连上 GitHub 仓库后，Vercel 会自动识别 Next.js 并构建。需要额外做三件事：
-
-**1. 配置环境变量**（Project Settings → Environment Variables）
-
-生产环境需要**两条**：
-
-| 变量 | 说明 |
-|---|---|
-| `DATABASE_URL` | 照本地 `.env.local` 填 |
-| `CRON_SECRET` | **必须手动添加**。Vercel 不会自动创建它 |
-
-`CRON_SECRET` 的机制是：你把它加进项目环境变量，Vercel 触发 cron 时就会把这个值
-作为 `Authorization: Bearer <值>` 发过来，端点自己比对。少了它，构建会直接失败——
-因为 `src/lib/env.ts` 在模块加载时校验，而 `next build` 收集路由数据时会加载到它。
-
-`DIRECT_DATABASE_URL` **不用配**：它只给本地 drizzle-kit 跑迁移用，运行时一行代码
-都不读它。生产环境不跑迁移，配上去只是多存一个用不到的数据库密钥。
-
-> Hobby 计划的两条 cron 限制：每个 cron 最多每天触发一次（更频繁的表达式会让
-> **部署失败**）；且实际触发时间在指定的那个小时内浮动，`0 4 * * *` 可能落在
-> 04:00 到 04:59 之间的任意时刻。
-
-**2. 函数区域**
-
-`vercel.json` 里 `"regions": ["icn1"]` 把函数钉在首尔，与 Supabase 项目所在的
-`ap-northeast-2` 同区。不钉的话函数默认落在美东，每次查询都要跨太平洋往返。
-
-> Node runtime 的函数只能用 `vercel.json` 的 `regions` 指定；路由段配置里的
-> `preferredRegion` 只对 edge runtime 生效，这里用不上。Hobby 计划可以任选
-> **一个**区域，多区域是 Pro 以上才有的能力。
-
-**3. 验证 cron 真的会跑**
-
-不用等到下个月 1 号。Vercel 控制台的 Cron Jobs 页面可以手动触发一次，
-然后看函数日志确认返回 200 而不是 401。
-
-## 设计取舍
-
-### 一、用户账本数据永不入库
-
-这是整个项目的地基，也是唯一一个真正需要解释的决定。
-
-用户的记账数据只存在于浏览器的 localStorage 和用户自己导出的文件里。后端读不到，
-数据库里没有，服务器日志里也不会出现。
-
-**为什么不存**：财务数据高度敏感。一旦入库，这个项目就同时背上了静态加密、密钥轮换、
-备份策略、跨境合规、以及泄露之后的通知责任。对一个开源的展示项目而言，这些责任没有
-一项是它有能力兑现的——而用户不会因为它是"展示项目"就少受一次泄露的损失。
-
-**它换来了什么**：不存用户身份数据 → 不需要账号系统 → 没有密码哈希、没有会话管理、
-没有 OAuth 回调、没有越权访问。全栈里最容易出安全事故的一整块，被一个架构决定整个
-移出了攻击面。
-
-这个取舍不是靠自觉维持的，代码层面有两道机械保障：
-
-1. `src/db/index.ts` 和 `src/lib/env.ts` 顶部都有 `import "server-only"`。任何试图
-   从客户端组件引用数据库或环境变量的代码，会在**构建期**直接失败，而不是等到运行时
-   才发现连接串进了浏览器 bundle。
-2. `fx_rates` 表开启了 RLS 且不建任何 policy。Supabase 默认会把 public schema 的表
-   通过 PostgREST 暴露给 anon key；开了 RLS 又没有 policy，anon 角色就一行也读不到。
-   服务端用连接串里的 postgres 角色访问，本就绕过 RLS。结果是这张表的唯一出入口是
-   我们自己的 API 层。
-
-### 二、月度汇率，不是日汇率
-
-汇率表以「月」为粒度（`month` 列存 `YYYY-MM`），不存日汇率。
-
-日汇率的短期波动对个人财务分析是纯噪音：它会让"这个月是不是花多了"这个问题的答案，
-取决于你恰好在哪一天做的对比。用月度基准把这层噪音消掉，月与月之间才可比。
-
-`month` 列用 `text` 而不是 `date`，也是同一个理由的延伸：这一列的语义是"一个月"，
-不是"某一天"。存成 `date` 就得随便挑 1 号来充当整个月，等于把一个并不存在的精度
-写进数据里。`YYYY-MM` 定长零填充，字典序即时间序，范围查询照样走索引。
-
-### 三、折算值冻结，永不重算
-
-每一笔交易折算成基准币的数值，一旦按**交易发生那个月**的汇率算出，就存为静态值。
-之后汇率表再怎么更新，已经折算过的历史数字不动。
-
-反面做法是用"今天的汇率"重算去年的消费——那会让用户每天打开应用，看到的历史都在变。
-一段已经发生的过去，不应该因为今天的汇率波动而改写。
-
-### 四、基准币默认 USD
-
-三个目标币种（SEK / THB / CNY）都有对 USD 的直接报价。以 USD 为基准可以避免
-两跳换算（例如 SEK → EUR → THB）把两次舍入误差叠加进结果。
-
-### 五、`rate` 用 `numeric` 而非 `double precision`
-
-汇率是金融数值。二进制浮点的舍入误差会一路带进用户看到的折算金额里。Drizzle 把
-`numeric` 映射为 JS `string` 也正是这个原因——中途落到 `number` 上就已经丢了精度。
+`rate` is a **string**, not a number — the column is `numeric`, and converting at
+the API boundary would lose precision that can't be recovered. An empty range
+returns `200` with empty arrays, not `404`: asking about 1990 is a valid question
+whose answer happens to be nothing, and the UI needs to tell "no data" apart from
+"wrong URL." Full parameter reference in the
+[Chinese README](README.zh-CN.md#get-apifx).
 
 ---
 
-### 六、免费层会把项目睡掉，所以有一个每天一次的探活任务
+## Not doing
 
-Supabase 免费层在**连续 7 天无活动**后会自动暂停项目，判定依据是真实的数据库
-查询和 API 流量，不是有没有打开控制台。而这个项目的抓取任务一个月才跑一次，
-撑不过这条线。
+No accounts or login, no mobile app, no collaboration, no AI advice engine, no bank
+or payment-provider integrations.
 
-对一个作品集项目，后果很具体：别人隔两周点开线上 demo，看到的是一个连不上
-数据库的报错页。数据不会丢，控制台点一下 Restore 几分钟就恢复，但没人能保证
-自己每周去点一次。
+The first one is an architectural decision, not a backlog item — see
+[design decision one](#one-the-ledger-never-touches-the-database).
 
-所以 `vercel.json` 里有第二个 cron：`/api/cron/keepalive` 每天跑一次，
-对 `fx_rates` 做一条走索引的 `max(month)` 查询。刻意查真表而不是 `select 1`
-——判定活跃看的是真实的数据库查询，一条不触碰任何表的语句是否算数并无明确
-说法，查真表则毫无疑问。
+## License
 
-这不是什么巧妙手法，就是免费层既定规则下唯一不花钱的做法；升级到付费计划
-同样能解决，只是对一个展示项目不划算。把它写在这里，是因为**这类运维约束
-往往比业务代码更能决定一个项目在别人眼里是不是「真的跑着」**。
-
-> Vercel Hobby 计划：每个项目最多 100 个 cron（2026 年 1 月起放开），
-> 但每个 cron 最多每天触发一次。月度抓取 + 每日探活共两个，在限制内。
-
-### 七、三张图，而不是一张三条线的图
-
-USD 对 SEK / THB / CNY 分别在 9.6 / 33 / 6.8 的量级。三条线挤在一条线性轴上，
-THB 会占满纵向空间，另外两条被压成近似水平的直线——图还在，信息没了。
-
-双 y 轴是更糟的解法：两个刻度如何对齐完全是任意的，图会凭空造出一种数据里
-并不存在的相关性。
-
-所以拆成**小倍数**：每个币种一张图、各自的 y 轴，纵向对齐后仍然能比较「形状」，
-而每张图里的数值都是真实汇率。另一种常见做法是把三条线归一到基期 = 100，
-那样能同图比较，但「1 美元换多少克朗」这个对记账有直接意义的数字就消失了。
-
-配色是跑验证器定的，不是挑好看的：三个色位在浅色与深色下都通过明度带、
-彩度下限、色觉障碍全配对分离度的检查。深色模式不是浅色的自动反转，而是同一
-批色相在深色底上单独选的一档。浅色模式下 aqua 那一档对比度低于 3:1，
-按规范以可见标签加数据表视图作补偿——数据表对财务工具本来也是刚需。
-
-
-## 明确不做的
-
-不做账号/登录、不做移动端 App、不做多人协作、不做 AI 建议、不接任何银行或支付平台 API。
-
-第一条是架构决定，不是没来得及做——见[设计取舍第一节](#一用户账本数据永不入库)。
-
-## 许可
-
-MIT，见 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).
