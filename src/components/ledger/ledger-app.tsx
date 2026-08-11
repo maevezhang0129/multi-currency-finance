@@ -13,6 +13,7 @@ import {
   type RateIndex,
 } from "@/lib/ledger/convert";
 import { formatAmount, formatMonthLabel } from "@/lib/ledger/format";
+import { toCsv } from "@/lib/ledger/csv";
 import { exportRaw, type KeyValueStore } from "@/lib/ledger/storage";
 import { changePercent, entriesInMonth, recentEntries, summarizeMonth } from "@/lib/ledger/summary";
 import {
@@ -27,6 +28,7 @@ import {
 import { useHydrated, useLedger } from "@/lib/ledger/use-ledger";
 
 import { CategoryManager } from "./category-manager";
+import { CsvImport } from "./csv-import";
 import { EntryList } from "./entry-list";
 import { EntrySheet, type EntryDraft } from "./entry-sheet";
 import {
@@ -172,6 +174,27 @@ export function LedgerApp() {
       setSheet(null);
     },
     [ledger, saveEntries],
+  );
+
+  const importEntries = useCallback(
+    (added: Entry[], newCategories: string[]) => {
+      if (settings.status !== "ok") return;
+      const ledgerBase = ledger.status === "ok" ? ledger.value : emptyLedger();
+      saveEntries({ ...ledgerBase, entries: [...ledgerBase.entries, ...added] });
+
+      // CSV 带进来的新分类要一并加进列表，否则它们立刻变成孤儿：
+      // 统计里看得到，设置里找不到。
+      if (newCategories.length > 0) {
+        saveHomeCurrency({
+          ...settings.value,
+          categories: {
+            ...settings.value.categories,
+            expense: [...settings.value.categories.expense, ...newCategories],
+          },
+        });
+      }
+    },
+    [ledger, settings, saveEntries, saveHomeCurrency],
   );
 
   const updateCategories = useCallback(
@@ -383,19 +406,46 @@ export function LedgerApp() {
               <p className="text-xs text-ink-subtle">
                 账本只存在这台设备的浏览器里。换设备或清理浏览器数据之前，先导出备份。
               </p>
-              <button
-                type="button"
-                onClick={() => downloadExport(store)}
-                className="self-start rounded-full border border-border-strong px-4 py-2 text-sm text-ink transition-colors hover:bg-surface-raised"
-              >
-                导出全部数据
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadCsv(entries)}
+                  className="rounded-full border border-border-strong px-4 py-2 text-sm text-ink transition-colors hover:bg-surface-raised"
+                >
+                  导出 CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadExport(store)}
+                  className="rounded-full border border-border-strong px-4 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
+                >
+                  导出原始备份
+                </button>
+              </div>
+              <p className="text-xs text-ink-subtle">
+                CSV 可以用 Excel 打开、修改，再导回来。原始备份是完整快照，
+                用于换设备时原样恢复。
+              </p>
             </div>
+
+            <CsvImport
+              entries={entries}
+              categories={settings.value.categories}
+              homeCurrency={homeCurrency}
+              base={BASE_CURRENCY}
+              rates={rates}
+              onImport={importEntries}
+            />
           </section>
         ) : null}
       </main>
 
-      <div className="pointer-events-none sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent px-6 pt-8 pb-6">
+      {/* 设置页不显示这个按钮：它会盖住页面底部的导出按钮，而且在设置页里也没有意义 */}
+      <div
+        className={`pointer-events-none sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent px-6 pt-8 pb-6 ${
+          view === "settings" ? "hidden" : ""
+        }`}
+      >
         <PrimaryAction
           className="pointer-events-auto w-full"
           onClick={() => setSheet("new")}
@@ -456,6 +506,17 @@ function download(content: string, filename: string) {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadCsv(entries: readonly Entry[]) {
+  // text/csv 加 charset 是为了让浏览器别再去猜编码——文件开头已经有 BOM 了。
+  const blob = new Blob([toCsv(entries)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `账本-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
