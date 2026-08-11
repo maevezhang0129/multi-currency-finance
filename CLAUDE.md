@@ -183,7 +183,14 @@ npx vitest run src/lib/fx/month.test.ts
 npx vitest run -t "addMonths"
 ```
 
-没有 `vitest.config.ts`，用的是默认配置：测试文件与源码同目录，命名 `*.test.ts`。
+测试文件与源码同目录，命名 `*.test.ts`（组件测试 `*.test.tsx`）。
+
+`vitest.config.ts` 默认跑 node 环境——两百多个纯函数测试不需要 DOM，全局开
+jsdom 只是白付代价。**组件测试靠文件顶部的 `@vitest-environment jsdom` 注释单独切换**。
+
+`globals` 是 false，所以 Testing Library 的自动清理不会生效，组件测试必须
+在 `afterEach` 里自己调 `cleanup()`——不调的话下一个测试会渲染出第二份组件，
+所有查询都报「找到多个元素」。
 
 手动回填历史汇率（本地）：
 
@@ -210,7 +217,8 @@ vercel.json (0 3 1 * *)
 - **`src/lib/fx/config.ts` 不是环境变量。** `BASE_CURRENCY` / `QUOTE_CURRENCIES` / `EARLIEST_MONTH` / `MAX_MONTHS_PER_RUN` 是产品定义，写死在代码里，改币种走 commit 而不是改生产配置。
 - **失败是返回值，不是异常。** `ingest.ts` 返回 `IngestOutcome[]`，三态 `written | skipped | failed`。一批失败不中断其余批次，但失败一定出现在返回值里——不要改成抛异常，也不要把 `skipped` 折叠进计数后丢掉清单。
 - **`skipped` 和 `failed` 语义不同。** `skipped` = 数据源那个月本来就没有（CNY 早于 2005）；`failed` = 出错了。混为一谈会让静默的数据缺失变得不可见。
-- **纯函数与副作用分离。** `month.ts` / `aggregate.ts` 无 IO，测试覆盖在这两层。`ingest.ts` 和 `route.ts` 目前无测试（会打真实网络和真库），新增逻辑尽量往纯函数那侧放。
+- **纯函数与副作用分离。** `month.ts` / `aggregate.ts` 无 IO，测试覆盖在这两层。`ingest.ts` 和 `route.ts` 无单元测试（会打真实网络和真库），新增逻辑尽量往纯函数那侧放。
+- **账本主界面有集成测试**（`ledger-app.test.tsx`）。纯函数测试保证「算得对」，集成测试保证「接得通」——两者拦的是不同的 bug。实测过：把「保存失败要提示用户」这条保护退回成静默关闭，纯函数测试全绿，集成测试立刻挂。新增用户可见的流程时，在那里补一条。
 - **`month.ts` 不用 `Date` 做月份加减**，字符串 + 整数运算，避免部署环境时区把月初月末算偏。取「当前月」一律走 `monthOf(date)`（UTC）。
 - **服务端专属模块顶部有 `import "server-only"`**（`src/db/index.ts`、`src/lib/env.ts`）。这是第 3 节那条原则的构建期保障，不要为了图方便去掉。
 
