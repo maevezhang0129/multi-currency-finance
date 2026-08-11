@@ -45,6 +45,14 @@ exists to answer it.
 - A monthly cron pulls ECB reference rates and stores the month's average
 - Trend chart uses small multiples — one panel per currency ([why not one chart with three lines](#four-three-charts-not-one-chart-with-three-lines))
 
+**Installable, and works offline**
+- Add to home screen and it opens like a native app — no address bar
+- A hand-written service worker (~130 lines, no Workbox) caches the shell, the
+  build output, and the last rates response. Kill the server and the app still
+  opens, still records, still converts
+- It also asks the browser for persistent storage, so the ledger isn't evicted
+  when the disk gets tight. Settings shows honestly whether that was granted
+
 <p align="center">
   <img src="docs/screenshots/csv-import.png" width="430" alt="CSV import: mapping unmatched columns, then a preview showing what will happen" />
   <img src="docs/screenshots/list-dark.png" width="290" alt="Entry list, dark mode" />
