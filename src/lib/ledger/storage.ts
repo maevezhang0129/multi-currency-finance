@@ -1,9 +1,12 @@
 import { z } from "zod";
 
 import {
+  defaultCategories,
   emptyLedger,
   ledgerSchema,
   settingsSchema,
+  settingsSchemaV1,
+  SETTINGS_VERSION,
   type Ledger,
   type Settings,
 } from "./types";
@@ -107,8 +110,38 @@ export function saveLedger(store: KeyValueStore, ledger: Ledger): void {
   store.setItem(LEDGER_KEY, JSON.stringify(result.data));
 }
 
+/**
+ * 解析设置，并把旧版本升上来。
+ *
+ * 版本号存在的意义就在这里：v1 只有本币，没有分类列表。直接用 v2 的 schema 去
+ * 解析会判定为「损坏」，于是用户被要求重新选一次本币——一个纯粹由我们改结构
+ * 造成的麻烦，不该让他承担。
+ *
+ * 升级是补默认值，不是清空重来：他之前选的本币原样保留。
+ */
+export function parseSettings(raw: string | null): LoadResult<Settings> {
+  const current = parseStored(raw, settingsSchema);
+  if (current.status !== "corrupt") return current;
+
+  // 当前版本解析不了，试试认识的旧版本。
+  const v1 = parseStored(raw, settingsSchemaV1);
+  if (v1.status === "ok") {
+    return {
+      status: "ok",
+      value: {
+        version: SETTINGS_VERSION,
+        homeCurrency: v1.value.homeCurrency,
+        categories: defaultCategories(),
+      },
+    };
+  }
+
+  // 旧版本也不认识，那是真的坏了。
+  return current;
+}
+
 export function loadSettings(store: KeyValueStore): LoadResult<Settings> {
-  return parseStored(store.getItem(SETTINGS_KEY), settingsSchema);
+  return parseSettings(store.getItem(SETTINGS_KEY));
 }
 
 export function saveSettings(store: KeyValueStore, settings: Settings): void {

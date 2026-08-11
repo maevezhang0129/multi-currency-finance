@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { FxResponse } from "../fx/api-types";
-import { buildRateIndex, convertToBase, needsRefreeze } from "./convert";
+import {
+  buildRateIndex,
+  convertToBase,
+  needsRefreeze,
+  refreshConversions,
+} from "./convert";
+import type { Entry } from "./types";
 
 const response: FxResponse = {
   base: "USD",
@@ -129,5 +135,78 @@ describe("needsRefreeze", () => {
 
   it("完全没折算过的记录需要处理", () => {
     expect(needsRefreeze("2026-07-15", null, rates, "SEK")).toBe(true);
+  });
+});
+
+describe("refreshConversions", () => {
+  const entry = (over: Partial<Entry>): Entry => ({
+    id: "x",
+    kind: "expense",
+    date: "2026-07-15",
+    amount: "142.00",
+    currency: "SEK",
+    category: "餐饮",
+    conversion: null,
+    createdAt: "2026-07-15T00:00:00.000Z",
+    ...over,
+  });
+
+  it("把从没折算过的记录补上", () => {
+    // 没有这一步，录入时离线的那笔会永远显示「待折算」、永远不计入合计。
+    const result = refreshConversions([entry({})], "USD", rates, NOW);
+    expect(result?.[0]?.conversion).toMatchObject({
+      amount: "14.68",
+      rateMonth: "2026-07",
+      frozen: true,
+    });
+  });
+
+  it("把临时折算换成当月真实汇率并冻结", () => {
+    const provisional = entry({
+      date: "2026-07-15",
+      conversion: {
+        base: "USD", amount: "15.11", rate: "9.4000000000",
+        rateMonth: "2026-05", frozen: false,
+      },
+    });
+    const result = refreshConversions([provisional], "USD", rates, NOW);
+    expect(result?.[0]?.conversion).toMatchObject({
+      rate: "9.6745652174",
+      rateMonth: "2026-07",
+      frozen: true,
+    });
+  });
+
+  it("已冻结的记录一个字都不动", () => {
+    const frozen = entry({
+      conversion: {
+        base: "USD", amount: "99.99", rate: "1.0000000000",
+        rateMonth: "2026-07", frozen: true,
+      },
+    });
+    expect(refreshConversions([frozen], "USD", rates, NOW)).toBeNull();
+  });
+
+  it("没有任何变化时返回 null，避免无谓写库", () => {
+    const frozen = entry({
+      conversion: {
+        base: "USD", amount: "14.68", rate: "9.6745652174",
+        rateMonth: "2026-07", frozen: true,
+      },
+    });
+    expect(refreshConversions([frozen], "USD", rates, NOW)).toBeNull();
+  });
+
+  it("仍然拿不到汇率时保持原样，不把已有的值抹掉", () => {
+    const cny = entry({
+      currency: "CNY",
+      conversion: {
+        base: "USD", amount: "13.99", rate: "7.1000000000",
+        rateMonth: "2026-06", frozen: false,
+      },
+    });
+    const result = refreshConversions([cny], "USD", rates, NOW);
+    // CNY 没有任何汇率数据，这条不该被改动
+    expect(result).toBeNull();
   });
 });

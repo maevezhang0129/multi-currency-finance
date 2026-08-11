@@ -183,16 +183,60 @@ describe("隔离损坏数据", () => {
 describe("设置", () => {
   it("往返正常", () => {
     const store = memoryStore();
-    saveSettings(store, { version: 1, homeCurrency: "SEK" });
+    saveSettings(store, {
+      version: 2,
+      homeCurrency: "SEK",
+      categories: { expense: ["餐饮"], income: ["工资"] },
+    });
     const result = loadSettings(store);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.value.homeCurrency).toBe("SEK");
   });
 
+  it("v1 的旧设置会被升级，而不是判成损坏", () => {
+    // 版本号存在的意义就在这里。判成损坏的话，用户会被要求重新选一次本币——
+    // 一个纯粹由我们改结构造成的麻烦，不该让他承担。
+    const store = memoryStore({
+      "mcf.settings": JSON.stringify({ version: 1, homeCurrency: "THB" }),
+    });
+    const result = loadSettings(store);
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    // 他之前选的本币原样保留
+    expect(result.value.homeCurrency).toBe("THB");
+    expect(result.value.version).toBe(2);
+    // 分类补上默认值
+    expect(result.value.categories.expense.length).toBeGreaterThan(5);
+    expect(result.value.categories.income).toContain("工资");
+  });
+
+  it("既不是 v2 也不是 v1 时才判成损坏", () => {
+    const store = memoryStore({
+      "mcf.settings": JSON.stringify({ version: 99, homeCurrency: "SEK" }),
+    });
+    expect(loadSettings(store).status).toBe("corrupt");
+  });
+
+  it("分类不能为空数组", () => {
+    const store = memoryStore({
+      "mcf.settings": JSON.stringify({
+        version: 2,
+        homeCurrency: "SEK",
+        categories: { expense: [], income: ["工资"] },
+      }),
+    });
+    expect(loadSettings(store).status).toBe("corrupt");
+  });
+
   it("不认识的本币会被拒绝", () => {
     const store = memoryStore({
-      "mcf.settings": JSON.stringify({ version: 1, homeCurrency: "JPY" }),
+      "mcf.settings": JSON.stringify({
+        version: 2,
+        homeCurrency: "JPY",
+        categories: { expense: ["餐饮"], income: ["工资"] },
+      }),
     });
     expect(loadSettings(store).status).toBe("corrupt");
   });

@@ -4,13 +4,14 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import {
   browserStore,
+  parseSettings,
   parseStored,
   saveLedger,
   saveSettings,
   type KeyValueStore,
   type LoadResult,
 } from "./storage";
-import { ledgerSchema, settingsSchema, type Ledger, type Settings } from "./types";
+import { ledgerSchema, type Ledger, type Settings } from "./types";
 
 /**
  * 把 localStorage 当作外部数据源订阅，而不是在 effect 里读一次塞进 state。
@@ -89,8 +90,10 @@ export function useLedger(): LedgerAccess {
     [rawLedger],
   );
 
+  // 走带迁移的解析：v1 的设置（只有本币）会被补上默认分类升到 v2，
+  // 而不是被判成损坏、逼用户重新选一次本币。
   const settings = useMemo<LoadResult<Settings>>(
-    () => parseStored(rawSettings, settingsSchema),
+    () => parseSettings(rawSettings),
     [rawSettings],
   );
 

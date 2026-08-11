@@ -22,21 +22,56 @@ export const SPENDABLE_CURRENCIES = [
 export type SpendableCurrency = (typeof SPENDABLE_CURRENCIES)[number];
 
 /**
- * 分类。写死在代码里而不是让用户自定义，理由和 fx/config.ts 一样：
- * 这是产品定义。分类一旦可自定义，就要处理改名、合并、删除后历史记录怎么办，
- * 而那些复杂度换来的价值，对一个自己用的账本来说并不划算。
+ * 默认分类。用户可以增删改，这里只是初始值。
+ *
+ * 收入和支出分开两套：「餐饮」不会是一笔收入，把它们混在一个列表里，
+ * 意味着每次记账都要在一堆用不上的选项里找。
+ *
+ * 记录里存的是分类的**名字**而不是 id。这让删除变得没有代价——删掉一个分类
+ * 只是不再把它列为选项，已有记录照常显示自己的名字，不会变成孤儿数据。
+ * 代价是改名要顺带更新已有记录，那是一次字符串替换（见 renameCategory）。
  */
-export const CATEGORIES = [
+export const DEFAULT_EXPENSE_CATEGORIES = [
   "餐饮",
-  "住宿",
+  "买菜",
+  "住房",
   "交通",
   "日用",
+  "服饰",
   "娱乐",
   "医疗",
+  "教育",
+  "通讯",
+  "旅行",
+  "人情",
+  "订阅",
   "其他",
 ] as const;
 
-export type Category = (typeof CATEGORIES)[number];
+export const DEFAULT_INCOME_CATEGORIES = [
+  "工资",
+  "奖金",
+  "投资",
+  "退款",
+  "其他",
+] as const;
+
+/** 分类名。长度上限是为了不让一个超长名字把界面撑破。 */
+export const categoryName = z
+  .string()
+  .trim()
+  .min(1, "分类名不能为空")
+  .max(12, "分类名最多 12 个字");
+
+export interface CategorySet {
+  expense: string[];
+  income: string[];
+}
+
+export const defaultCategories = (): CategorySet => ({
+  expense: [...DEFAULT_EXPENSE_CATEGORIES],
+  income: [...DEFAULT_INCOME_CATEGORIES],
+});
 
 /** 收入还是支出。账本只记支出的话，储蓄率这类分析就无从谈起。 */
 export const ENTRY_KINDS = ["expense", "income"] as const;
@@ -96,7 +131,11 @@ export const entrySchema = z.object({
   date: dateString,
   amount: amountString,
   currency: z.enum(SPENDABLE_CURRENCIES),
-  category: z.enum(CATEGORIES),
+  /**
+   * 分类名。这里存名字而不是引用某个 id——分类被删掉之后，
+   * 这条记录仍然知道自己属于什么，不会变成一条没有归属的账。
+   */
+  category: categoryName,
   note: z.string().max(200).optional(),
   /**
    * 折算成基准币的结果。
@@ -120,9 +159,22 @@ export const ledgerSchema = z.object({
 
 export type Ledger = z.infer<typeof ledgerSchema>;
 
+/** 当前设置格式版本。加字段时必须加一，并在 storage 里写迁移。 */
+export const SETTINGS_VERSION = 2;
+
 export const settingsSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(SETTINGS_VERSION),
   /** 用户日常所在地的币种，界面上的主视角。 */
+  homeCurrency: z.enum(SPENDABLE_CURRENCIES),
+  categories: z.object({
+    expense: z.array(categoryName).min(1, "至少要保留一个支出分类"),
+    income: z.array(categoryName).min(1, "至少要保留一个收入分类"),
+  }),
+});
+
+/** v1 的设置只有本币。升级时补上默认分类，用户的选择不丢。 */
+export const settingsSchemaV1 = z.object({
+  version: z.literal(1),
   homeCurrency: z.enum(SPENDABLE_CURRENCIES),
 });
 

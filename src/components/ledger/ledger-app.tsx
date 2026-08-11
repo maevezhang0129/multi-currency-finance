@@ -6,18 +6,28 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FxResponse } from "@/lib/fx/api-types";
 import { BASE_CURRENCY } from "@/lib/fx/config";
 import { addMonths, monthOf } from "@/lib/fx/month";
-import { buildRateIndex, convertToBase, type RateIndex } from "@/lib/ledger/convert";
+import {
+  buildRateIndex,
+  convertToBase,
+  refreshConversions,
+  type RateIndex,
+} from "@/lib/ledger/convert";
 import { formatAmount, formatMonthLabel } from "@/lib/ledger/format";
 import { exportRaw, type KeyValueStore } from "@/lib/ledger/storage";
-import { changePercent, recentEntries, summarizeMonth } from "@/lib/ledger/summary";
+import { changePercent, entriesInMonth, recentEntries, summarizeMonth } from "@/lib/ledger/summary";
 import {
+  defaultCategories,
   emptyLedger,
+  SETTINGS_VERSION,
   SPENDABLE_CURRENCIES,
+  type CategorySet,
   type Entry,
   type SpendableCurrency,
 } from "@/lib/ledger/types";
 import { useHydrated, useLedger } from "@/lib/ledger/use-ledger";
 
+import { CategoryManager } from "./category-manager";
+import { EntryList } from "./entry-list";
 import { EntrySheet, type EntryDraft } from "./entry-sheet";
 import {
   CategoryBars,
@@ -50,7 +60,9 @@ export function LedgerApp() {
   // 每次加载完连着触发两次渲染，React 的 set-state-in-effect 规则正是拦这个。
   const [ratesState, setRatesState] = useState<RatesState>({ status: "loading" });
   const [monthOffset, setMonthOffset] = useState(0);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [view, setView] = useState<"overview" | "list" | "settings">("overview");
+  /** null = 关闭；"new" = 新增；否则是正在编辑的那条记录 */
+  const [sheet, setSheet] = useState<"new" | Entry | null>(null);
 
   // 取汇率。失败不阻塞记账——拿不到汇率只是折算不了，账还是要能记。
   useEffect(() => {
@@ -89,6 +101,21 @@ export function LedgerApp() {
 
   const rates = ratesState.status === "ready" ? ratesState.index : null;
 
+  /*
+   * 汇率到位后把该补的记录补上，写一次库。
+   *
+   * 没有这一步，两类记录会永远停在原地：录入时离线拿不到汇率的（一直显示
+   * 「待折算」、一直不计入合计），和当月的临时折算（月份结束、真实均值入库后
+   * 仍用着旧汇率）。refreshConversions 没有变化时返回 null，所以这里不会每次
+   * 加载都无谓地写一遍。
+   */
+  useEffect(() => {
+    if (rates === null || ledger.status !== "ok") return;
+    const next = refreshConversions(ledger.value.entries, BASE_CURRENCY, rates);
+    if (next === null) return;
+    saveEntries({ ...ledger.value, entries: next });
+  }, [rates, ledger, saveEntries]);
+
   const summary = useMemo(() => {
     if (month === "" || rates === null) return null;
     return summarizeMonth(entries, month, homeCurrency, BASE_CURRENCY, rates);
@@ -101,8 +128,8 @@ export function LedgerApp() {
     );
   }, [entries, month, homeCurrency, rates]);
 
-  const addEntry = useCallback(
-    (draft: EntryDraft) => {
+  const upsertEntry = useCallback(
+    (draft: EntryDraft, existing: Entry | null) => {
       const conversion =
         rates === null
           ? null
@@ -115,7 +142,7 @@ export function LedgerApp() {
             });
 
       const entry: Entry = {
-        id: crypto.randomUUID(),
+        id: existing?.id ?? crypto.randomUUID(),
         kind: draft.kind,
         date: draft.date,
         amount: draft.amount,
@@ -123,14 +150,40 @@ export function LedgerApp() {
         category: draft.category as Entry["category"],
         ...(draft.note.length > 0 ? { note: draft.note } : {}),
         conversion,
-        createdAt: new Date().toISOString(),
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
       };
 
       const base = ledger.status === "ok" ? ledger.value : emptyLedger();
-      saveEntries({ ...base, entries: [...base.entries, entry] });
-      setSheetOpen(false);
+      const next =
+        existing === null
+          ? [...base.entries, entry]
+          : base.entries.map((e) => (e.id === existing.id ? entry : e));
+
+      saveEntries({ ...base, entries: next });
+      setSheet(null);
     },
     [ledger, rates, saveEntries],
+  );
+
+  const deleteEntry = useCallback(
+    (id: string) => {
+      const base = ledger.status === "ok" ? ledger.value : emptyLedger();
+      saveEntries({ ...base, entries: base.entries.filter((e) => e.id !== id) });
+      setSheet(null);
+    },
+    [ledger, saveEntries],
+  );
+
+  const updateCategories = useCallback(
+    (next: CategorySet, nextEntries?: Entry[]) => {
+      if (settings.status !== "ok") return;
+      saveHomeCurrency({ ...settings.value, categories: next });
+      if (nextEntries !== undefined) {
+        const base = ledger.status === "ok" ? ledger.value : emptyLedger();
+        saveEntries({ ...base, entries: nextEntries });
+      }
+    },
+    [settings, ledger, saveHomeCurrency, saveEntries],
   );
 
   if (!hydrated || ratesState.status === "loading") return <LoadingState />;
@@ -142,7 +195,11 @@ export function LedgerApp() {
     return (
       <FirstRun
         onPick={(currency) =>
-          saveHomeCurrency({ version: 1, homeCurrency: currency })
+          saveHomeCurrency({
+            version: SETTINGS_VERSION,
+            homeCurrency: currency,
+            categories: defaultCategories(),
+          })
         }
       />
     );
@@ -175,13 +232,24 @@ export function LedgerApp() {
               ›
             </button>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3.5">
             <button
               type="button"
-              onClick={() => downloadExport(store)}
-              className="text-sm text-ink-muted transition-colors hover:text-ink"
+              onClick={() => setView(view === "list" ? "overview" : "list")}
+              className={`text-sm transition-colors hover:text-ink ${
+                view === "list" ? "text-ink" : "text-ink-muted"
+              }`}
             >
-              导出
+              明细
+            </button>
+            <button
+              type="button"
+              onClick={() => setView(view === "settings" ? "overview" : "settings")}
+              className={`text-sm transition-colors hover:text-ink ${
+                view === "settings" ? "text-ink" : "text-ink-muted"
+              }`}
+            >
+              设置
             </button>
             <Link
               href="/rates"
@@ -192,6 +260,8 @@ export function LedgerApp() {
           </div>
         </header>
 
+        {view === "overview" ? (
+        <>
         <section className="pb-10">
           <p className="tnum flex items-baseline gap-2 whitespace-nowrap text-ink">
             <span className={`${heroSizeClass(total)} font-semibold tracking-tight`}>
@@ -238,25 +308,97 @@ export function LedgerApp() {
         ) : null}
 
         <section className="mt-8 border-t border-border-subtle pt-7">
-          <h2 className="pb-2 text-xs font-medium tracking-wide text-ink-subtle">
-            最近
-          </h2>
+          <div className="flex items-baseline justify-between pb-2">
+            <h2 className="text-xs font-medium tracking-wide text-ink-subtle">
+              最近
+            </h2>
+            {recent.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setView("list")}
+                className="text-xs text-ink-muted transition-colors hover:text-ink"
+              >
+                全部记录
+              </button>
+            ) : null}
+          </div>
           {recent.length === 0 ? (
             <EmptyLedger />
           ) : (
             <ul className="divide-y divide-border-subtle">
               {recent.map((e) => (
-                <EntryRow key={e.id} entry={e} homeCurrency={homeCurrency} />
+                <EntryRow
+                  key={e.id}
+                  entry={e}
+                  homeCurrency={homeCurrency}
+                  onClick={() => setSheet(e)}
+                />
               ))}
             </ul>
           )}
         </section>
+        </>
+        ) : null}
+
+        {view === "list" ? (
+          <section className="pt-2">
+            <EntryList
+              entries={entriesInMonth(entries, month)}
+              homeCurrency={homeCurrency}
+              onSelect={(e) => setSheet(e)}
+            />
+          </section>
+        ) : null}
+
+        {view === "settings" ? (
+          <section className="flex flex-col gap-8 pt-2">
+            <CategoryManager
+              categories={settings.value.categories}
+              entries={entries}
+              onChange={updateCategories}
+            />
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold text-ink">本币</h2>
+              <div className="flex flex-wrap gap-2">
+                {SPENDABLE_CURRENCIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() =>
+                      saveHomeCurrency({ ...settings.value, homeCurrency: c })
+                    }
+                    className={`rounded-full px-4 py-2 text-sm transition-colors ${
+                      homeCurrency === c
+                        ? "bg-ink text-background"
+                        : "border border-border-strong text-ink hover:bg-surface-raised"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold text-ink">数据</h2>
+              <p className="text-xs text-ink-subtle">
+                账本只存在这台设备的浏览器里。换设备或清理浏览器数据之前，先导出备份。
+              </p>
+              <button
+                type="button"
+                onClick={() => downloadExport(store)}
+                className="self-start rounded-full border border-border-strong px-4 py-2 text-sm text-ink transition-colors hover:bg-surface-raised"
+              >
+                导出全部数据
+              </button>
+            </div>
+          </section>
+        ) : null}
       </main>
 
       <div className="pointer-events-none sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent px-6 pt-8 pb-6">
         <PrimaryAction
           className="pointer-events-auto w-full"
-          onClick={() => setSheetOpen(true)}
+          onClick={() => setSheet("new")}
         >
           记一笔
         </PrimaryAction>
@@ -267,16 +409,34 @@ export function LedgerApp() {
         上一笔的金额不会留在输入框里——「看起来已经填好了」是最容易让人误记
         一笔的状态。
       */}
-      {sheetOpen ? (
+      {sheet !== null ? (
         <EntrySheet
           homeCurrency={homeCurrency}
           today={today}
-          onClose={() => setSheetOpen(false)}
-          onSubmit={addEntry}
+          expenseCategories={settings.value.categories.expense}
+          incomeCategories={settings.value.categories.income}
+          initial={sheet === "new" ? undefined : toDraft(sheet)}
+          onDelete={sheet === "new" ? undefined : () => deleteEntry(sheet.id)}
+          onClose={() => setSheet(null)}
+          onSubmit={(draft) =>
+            upsertEntry(draft, sheet === "new" ? null : sheet)
+          }
         />
       ) : null}
     </div>
   );
+}
+
+/** 把一条已有记录转成录入浮层的初始值。 */
+function toDraft(entry: Entry): EntryDraft {
+  return {
+    amount: entry.amount,
+    currency: entry.currency,
+    category: entry.category,
+    date: entry.date,
+    note: entry.note ?? "",
+    kind: entry.kind,
+  };
 }
 
 /**

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { CATEGORIES, SPENDABLE_CURRENCIES, type Entry } from "@/lib/ledger/types";
+import { SPENDABLE_CURRENCIES, type Entry } from "@/lib/ledger/types";
 
 /**
  * 「记一笔」录入浮层。
@@ -30,22 +30,38 @@ export interface EntryDraft {
 export function EntrySheet({
   homeCurrency,
   today,
+  expenseCategories,
+  incomeCategories,
+  initial,
   onClose,
   onSubmit,
+  onDelete,
 }: {
   homeCurrency: string;
+  /** 分类由外部传入——用户可以自定义，组件不该持有这份产品定义。 */
+  expenseCategories: string[];
+  incomeCategories: string[];
+  /** 传入表示编辑已有记录；不传表示新增。 */
+  initial?: EntryDraft;
+  onDelete?: () => void;
   /** YYYY-MM-DD。由调用方给，组件自己不读时钟，方便测试与预览。 */
   today: string;
   onClose: () => void;
   onSubmit: (draft: EntryDraft) => void;
 }) {
-  const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState(homeCurrency);
-  const [category, setCategory] = useState<string>(CATEGORIES[0]);
-  const [date, setDate] = useState(today);
-  const [note, setNote] = useState("");
-  const [kind, setKind] = useState<Entry["kind"]>("expense");
-  const [showMore, setShowMore] = useState(false);
+  const [amount, setAmount] = useState(initial?.amount ?? "");
+  const [currency, setCurrency] = useState(initial?.currency ?? homeCurrency);
+  const [kind, setKind] = useState<Entry["kind"]>(initial?.kind ?? "expense");
+  const [category, setCategory] = useState<string>(
+    initial?.category ?? expenseCategories[0] ?? "其他",
+  );
+  const [date, setDate] = useState(initial?.date ?? today);
+  const [note, setNote] = useState(initial?.note ?? "");
+  const [showMore, setShowMore] = useState(
+    initial !== undefined && (initial.note.length > 0 || initial.date !== today),
+  );
+
+  const categories = kind === "expense" ? expenseCategories : incomeCategories;
 
   const amountRef = useRef<HTMLInputElement>(null);
 
@@ -99,7 +115,13 @@ export function EntrySheet({
               <button
                 key={k}
                 type="button"
-                onClick={() => setKind(k)}
+                onClick={() => {
+                  setKind(k);
+                  // 收支各有各的分类，切换后原分类多半不在新列表里，
+                  // 留着会让用户以为选中了一个其实不存在的选项。
+                  const next = k === "expense" ? expenseCategories : incomeCategories;
+                  if (!next.includes(category)) setCategory(next[0] ?? "其他");
+                }}
                 className={`rounded-full px-3 py-1 text-sm transition-colors ${
                   kind === k
                     ? "bg-accent text-accent-ink"
@@ -145,7 +167,7 @@ export function EntrySheet({
 
         {/* 分类。一排标签，点一次就选中。 */}
         <div className="flex flex-wrap gap-2 pt-4">
-          {CATEGORIES.map((c) => (
+          {categories.map((c) => (
             <button
               key={c}
               type="button"
@@ -196,11 +218,21 @@ export function EntrySheet({
           )}
         </div>
 
+        {onDelete ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="mt-5 w-full rounded-full border border-border-strong py-2.5 text-sm text-ink-muted transition-colors hover:text-ink"
+          >
+            删除这笔
+          </button>
+        ) : null}
+
         <button
           type="button"
           onClick={submit}
           disabled={!amountValid}
-          className="mt-6 w-full rounded-full bg-accent py-3.5 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 active:opacity-80 disabled:cursor-not-allowed disabled:opacity-30"
+          className="mt-3 w-full rounded-full bg-accent py-3.5 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 active:opacity-80 disabled:cursor-not-allowed disabled:opacity-30"
         >
           保存
         </button>

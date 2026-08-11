@@ -1,7 +1,7 @@
 import type { FxResponse } from "../fx/api-types";
 import { monthOf, type Month } from "../fx/month";
 import { divide } from "./money";
-import type { Conversion } from "./types";
+import type { Conversion, Entry } from "./types";
 
 /**
  * 把一笔消费折算成基准币。纯函数，不碰网络也不碰存储。
@@ -115,10 +115,52 @@ export function convertToBase({
 }
 
 /**
+ * 用最新的汇率把该补的记录补上，返回新的记录数组；没有任何变化时返回 null。
+ *
+ * 这是折算这件事的闭环。没有它，两类记录会永远停在原地：录入时拿不到汇率的
+ * （显示「待折算」，且不计入合计），和当月记录的临时折算（月份结束、真实均值
+ * 入库后仍用着旧汇率）。
+ *
+ * 返回 null 而不是原数组，是为了让调用方能判断「要不要写库」——每次汇率加载
+ * 完都无条件写一遍 localStorage，会把不该变的 fetchedAt 之类反复搅动。
+ */
+export function refreshConversions(
+  entries: readonly Entry[],
+  base: string,
+  rates: RateIndex,
+  now: Date = new Date(),
+): Entry[] | null {
+  let changed = false;
+
+  const next = entries.map((entry) => {
+    if (!needsRefreeze(entry.date, entry.conversion, rates, entry.currency)) {
+      return entry;
+    }
+
+    const conversion = convertToBase({
+      amount: entry.amount,
+      currency: entry.currency,
+      date: entry.date,
+      base,
+      rates,
+      now,
+    });
+
+    // 仍然拿不到汇率就保持原样，不要把已有的临时值抹成 null。
+    if (conversion === null) return entry;
+
+    changed = true;
+    return { ...entry, conversion };
+  });
+
+  return changed ? next : null;
+}
+
+/**
  * 这条折算是否还需要重算。
  *
- * 用于汇率数据更新后回填历史：临时折算的记录，一旦它所属月份的汇率入库，
- * 就该重算一次并冻结。已冻结的永远返回 false——那正是「历史不会变」的含义。
+ * 临时折算的记录，一旦它所属月份的汇率入库，就该重算一次并冻结。
+ * 已冻结的永远返回 false——那正是「历史不会变」的含义。
  */
 export function needsRefreeze(
   entryDate: string,
