@@ -60,12 +60,17 @@ export function browserStore(): KeyValueStore | null {
   }
 }
 
-function load<T>(
-  store: KeyValueStore,
-  key: string,
+/**
+ * 解析一段存下来的字符串。纯函数——不读存储，只处理内容。
+ *
+ * 单独拆出来是为了让「订阅原始字符串 → 解析」这条链上的依赖是真实的：
+ * 调用方拿到 raw 之后可以只在 raw 变化时重新解析，而不是传一个用不到的
+ * 依赖去骗 useMemo。
+ */
+export function parseStored<T>(
+  raw: string | null,
   schema: z.ZodType<T>,
 ): LoadResult<T> {
-  const raw = store.getItem(key);
   if (raw === null) return { status: "empty" };
 
   let parsed: unknown;
@@ -84,7 +89,7 @@ function load<T>(
 }
 
 export function loadLedger(store: KeyValueStore): LoadResult<Ledger> {
-  return load(store, LEDGER_KEY, ledgerSchema);
+  return parseStored(store.getItem(LEDGER_KEY), ledgerSchema);
 }
 
 /**
@@ -103,7 +108,7 @@ export function saveLedger(store: KeyValueStore, ledger: Ledger): void {
 }
 
 export function loadSettings(store: KeyValueStore): LoadResult<Settings> {
-  return load(store, SETTINGS_KEY, settingsSchema);
+  return parseStored(store.getItem(SETTINGS_KEY), settingsSchema);
 }
 
 export function saveSettings(store: KeyValueStore, settings: Settings): void {
