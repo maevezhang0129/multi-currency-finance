@@ -1,28 +1,86 @@
 @import "tailwindcss";
 
+/*
+ * 设计变量。
+ *
+ * 组件里一律写 `text-ink-muted` 这样的语义名，不要写 `text-black/60
+ * dark:text-white/60`。理由不是「更好看」，而是：颜色一旦散落在几十个组件里，
+ * 想调整层次感就得翻遍全项目，而且浅色深色两套值必然会有地方对不上。
+ * 集中在这里，改一处全站生效。
+ *
+ * 三档文字色是刻意的。界面上的字天然有主次：金额是主角，标签是配角，
+ * 时间戳是背景板。都用同一个颜色，眼睛就得自己去分辨谁重要。
+ */
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* 表面：页面底色 / 卡片底色 */
+  --surface: #ffffff;
+  --surface-raised: #fafaf9;
+
+  /* 分隔线。两档：常规分隔用弱的，需要围出一块区域时用强的 */
+  --border: #eceae5;
+  --border-strong: #dbd8d1;
+
+  /* 文字三档 */
+  --ink: #171717;
+  --ink-muted: #52514e;
+  --ink-subtle: #6b6a65;
+
+  /* 强调色。复用图表配色里已通过验证器的那个蓝 */
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --surface: #0a0a0a;
+    --surface-raised: #161615;
+
+    --border: #26251f;
+    --border-strong: #3a3830;
+
+    --ink: #ededed;
+    --ink-muted: #a3a29b;
+    --ink-subtle: #85847d;
+
+    --accent: #3987e5;
+    --accent-ink: #ffffff;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border-subtle: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* layout.tsx 加载了 Geist 却被这里的 Arial 覆盖掉了，是个 bug。 */
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* 金额一律等宽数字，否则每次数字变化列宽都在跳。 */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 /*
